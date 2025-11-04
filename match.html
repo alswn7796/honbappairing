@@ -1,3 +1,4 @@
+<!-- filename: match.html -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -5,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>혼밥러 · 매칭</title>
     <link rel="stylesheet" href="style.css" />
-    <script type="module" src="./firebase.js?v=26"></script>
+    <script type="module" src="./firebase.js?v=24"></script>
 </head>
 <body>
     <div class="container">
@@ -47,52 +48,36 @@
 
         async function ensureFbReady(timeoutMs = 8000) {
             if (window.fb) return window.fb;
-            const readyP = (window.fbReady && typeof window.fbReady.then === 'function') ? window.fbReady :
-                new Promise((resolve, reject) => {
-                    const st = Date.now();
-                    const iv = setInterval(() => {
-                        if (window.fb) { clearInterval(iv); resolve(window.fb); }
-                        if (Date.now() - st > timeoutMs) { clearInterval(iv); reject(new Error('firebase 로더가 준비되지 않았어요.')); }
-                    }, 100);
-                });
+            const readyP = (window.fbReady && typeof window.fbReady.then === 'function') ? window.fbReady
+                : new Promise((resolve, reject) => { const st = Date.now(); const iv = setInterval(() => { if (window.fb) { clearInterval(iv); resolve(window.fb); } if (Date.now() - st > timeoutMs) { clearInterval(iv); reject(new Error('firebase 로더가 준비되지 않았어요.')); } }, 100); });
             const timeoutP = new Promise((_, rej) => setTimeout(() => rej(new Error('firebase 로더가 준비되지 않았어요.')), timeoutMs));
             return await Promise.race([readyP, timeoutP]);
         }
 
+        // 최근 방 다시 열기
         const lastRoomId = localStorage.getItem('lastRoomId');
-        if (lastRoomId) {
-            const b = $('reopenBtn'); b.style.display = 'inline-block';
-            b.addEventListener('click', () => { location.href = `chat.html?room=${encodeURIComponent(lastRoomId)}`; });
-        }
+        if (lastRoomId) { const b = $('reopenBtn'); b.style.display = 'inline-block'; b.addEventListener('click', () => { location.href = `chat.html?room=${encodeURIComponent(lastRoomId)}`; }); }
 
-        // ---- 취소/상태 플래그 ----
+        // ---- 플래그/유틸 ----
         let finding = false, cancelRequested = false;
-
         const filterIds = ['yearSame', 'majorSame', 'ageSame', 'genderSame', 'freeOverlap', 'onlineOnly'];
-        const setFiltersDisabled = (disabled) => {
-            const box = $('filters'); box?.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-            filterIds.forEach(id => { const el = $(id); if (el) el.disabled = disabled; });
-        };
-        const setFindingUI = (on) => {
-            const startBtn = $('startBtn');
-            startBtn.classList.toggle('loading', on);
-            startBtn.textContent = on ? '매칭 중' : '혼밥러 찾기';
-            startBtn.disabled = on;
-            setFiltersDisabled(on);
-        };
+        const setFiltersDisabled = (disabled) => { const box = $('filters'); box?.setAttribute('aria-disabled', disabled ? 'true' : 'false'); filterIds.forEach(id => { const el = $(id); if (el) el.disabled = disabled; }); };
+        const setFindingUI = (on) => { const startBtn = $('startBtn'); startBtn.classList.toggle('loading', on); startBtn.textContent = on ? '매칭 중' : '혼밥러 찾기'; startBtn.disabled = on; setFiltersDisabled(on); };
         const checkCancelled = () => { if (cancelRequested) { say('대기열에서 나갔어요.'); return true; } return false; };
 
+        // 이벤트
         $('startBtn').addEventListener('click', onStart);
         $('leaveBtn').addEventListener('click', onLeave);
-
         window.addEventListener('beforeunload', async () => { try { const fb = await ensureFbReady(500); await fb.cancelMatching(); } catch { } });
         document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'hidden') { try { const fb = await ensureFbReady(500); await fb.markLeaving(); } catch { } } });
 
+        // --------- 매칭 플로우 ----------
         async function onStart() {
             if (finding) return;
             finding = true; cancelRequested = false; setFindingUI(true); say('대기열에 등록했습니다. 매칭 중…');
+
             try {
-                const fb = await ensureFbReady(); if (checkCancelled()) return cleanup();
+                const fb = await ensureFbReady();
                 const opts = {
                     yearSame: $('yearSame').checked, majorSame: $('majorSame').checked,
                     ageSame: $('ageSame').checked, genderSame: $('genderSame').checked,
@@ -100,23 +85,29 @@
                 };
                 const { id: roomId } = await fb.startMatching(opts);
                 if (checkCancelled()) return cleanup(true, fb);
-                say('매칭 중… (상대 수락 대기)');
 
+                // ✅ 자동 수락: 초대/피초대 구분 없이 즉시 'pendingAccept' → 'startCheck'로 진행
+                try { await fb.acceptMatch(roomId); } catch (_) { }
+
+                say('매칭 중… (상대 수락 대기)');
                 const accepted = await fb.readyToAccept(roomId, 30);
                 if (checkCancelled()) return cleanup(true, fb);
-                if (!accepted) { say('상대가 수락하지 않았어요. (패널티 -1점)', false); await fb.applyPenalty({ kind: 'early_decline' }); return; }
+                if (!accepted) {
+                    say('상대가 수락하지 않았어요. (패널티 -1점)', false);
+                    await fb.applyPenalty({ kind: 'early_decline' });
+                    return;
+                }
 
                 say('매칭 성공! "채팅 시작(Y/n)" 단계로 넘어갑니다.');
                 const yes = window.confirm('채팅을 시작 하시겠습니까?');
                 if (checkCancelled()) return cleanup(true, fb);
 
-                if (yes) await fb.startYes(roomId);
+                if (yes) { await fb.startYes(roomId); }
                 else { await fb.startNo(roomId); say('채팅 시작을 거절했어요. (패널티 -1점)', false); await fb.applyPenalty({ kind: 'start_decline' }); return; }
 
                 say('매칭 중… (상대 시작 여부 확인)');
                 const go = await fb.readyToChat(roomId, 30);
                 if (checkCancelled()) return cleanup(true, fb);
-
                 if (go) { localStorage.setItem('lastRoomId', roomId); say('채팅방으로 이동합니다…'); await fb.gotoRoom(roomId); }
                 else { say('상대가 채팅 시작을 거절했어요. (패널티 -1점)', false); await fb.applyPenalty({ kind: 'start_decline' }); }
             } catch (e) {
@@ -129,13 +120,12 @@
             try { const fb = await ensureFbReady(); await fb.cancelMatching(); say('대기열에서 나갔어요.'); }
             catch (e) { console.error(e); say('나가기 실패: ' + (e?.message || e), false); }
         }
-
         function cleanup(alsoCancel = false, fbInstance = null) {
             if (!cancelRequested) say(''); finding = false; setFindingUI(false);
             if (alsoCancel) { (async () => { try { const fb = fbInstance || await ensureFbReady(); await fb.cancelMatching(); } catch { } })(); }
         }
     </script>
-    <!-- 순서 유지 -->
+
     <script src="config.js?v=26"></script>
     <script type="module" src="firebase.js?v=26"></script>
 </body>
