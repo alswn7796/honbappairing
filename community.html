@@ -117,11 +117,11 @@
             const display = p.authorDisplay || (p.authorEmail ? p.authorEmail.split("@")[0] : "익명");
 
             wrap.innerHTML = `
-            <h3 class="post-title">${esc(p.title)}</h3>
-            <div class="post-meta">${esc(display)} · ${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</div>
-            <div class="post-body">${esc(p.body)}</div>
-            <div class="row" style="gap:8px; margin-top:8px"></div>
-          `;
+                <h3 class="post-title">${esc(p.title)}</h3>
+                <div class="post-meta">${esc(display)} · ${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</div>
+                <div class="post-body">${esc(p.body)}</div>
+                <div class="row" style="gap:8px; margin-top:8px"></div>
+              `;
             const row = wrap.querySelector(".row");
             if (canEditOrDelete(p)) {
                 const editBtn = document.createElement("button");
