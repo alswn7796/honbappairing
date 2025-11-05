@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>혼밥러 · 매칭</title>
     <link rel="stylesheet" href="style.css" />
-    <script type="module" src="./firebase.js?v=24"></script>
+    <script type="module" src="./firebase.js?v=28"></script>
 </head>
 <body>
     <div class="container">
@@ -86,15 +86,15 @@
                 const { id: roomId } = await fb.startMatching(opts);
                 if (checkCancelled()) return cleanup(true, fb);
 
-                // ✅ 자동 수락: 초대/피초대 구분 없이 즉시 'pendingAccept' → 'startCheck'로 진행
+                // 자동 수락 시도
                 try { await fb.acceptMatch(roomId); } catch (_) { }
 
                 say('매칭 중… (상대 수락 대기)');
                 const accepted = await fb.readyToAccept(roomId, 30);
                 if (checkCancelled()) return cleanup(true, fb);
                 if (!accepted) {
-                    say('상대가 수락하지 않았어요. (패널티 -1점)', false);
-                    await fb.applyPenalty({ kind: 'early_decline' });
+                    // ❌ 상대 미응답/거절: 내 패널티는 부과하지 않음
+                    say('상대가 수락하지 않았어요.', false);
                     return;
                 }
 
@@ -103,13 +103,16 @@
                 if (checkCancelled()) return cleanup(true, fb);
 
                 if (yes) { await fb.startYes(roomId); }
-                else { await fb.startNo(roomId); say('채팅 시작을 거절했어요. (패널티 -1점)', false); await fb.applyPenalty({ kind: 'start_decline' }); return; }
+                else { await fb.startNo(roomId); say('채팅 시작을 거절했습니다.', false); return; }
 
                 say('매칭 중… (상대 시작 여부 확인)');
                 const go = await fb.readyToChat(roomId, 30);
                 if (checkCancelled()) return cleanup(true, fb);
                 if (go) { localStorage.setItem('lastRoomId', roomId); say('채팅방으로 이동합니다…'); await fb.gotoRoom(roomId); }
-                else { say('상대가 채팅 시작을 거절했어요. (패널티 -1점)', false); await fb.applyPenalty({ kind: 'start_decline' }); }
+                else {
+                    // ❌ 상대가 "아니오": 내 패널티는 부과하지 않음
+                    say('상대가 채팅 시작을 거절했어요.', false);
+                }
             } catch (e) {
                 console.error(e); say('시작 실패: ' + (e?.message || e), false);
             } finally { cleanup(); }
@@ -127,6 +130,6 @@
     </script>
 
     <script src="config.js?v=26"></script>
-    <script type="module" src="firebase.js?v=26"></script>
+    <script type="module" src="firebase.js?v=28"></script>
 </body>
 </html>
