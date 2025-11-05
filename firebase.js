@@ -1,4 +1,4 @@
-// firebase.js v27 — 혼밥러 공용 헬퍼
+// firebase.js v28 — 혼밥러 공용 헬퍼
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
     getAuth, onAuthStateChanged, signInAnonymously, signOut,
@@ -213,7 +213,7 @@ const presence = {
 };
 presence.start();
 
-// 7~9) 매칭/채팅/테스트봇 (동일)
+// 7~9) 매칭/채팅/테스트봇
 const MATCH_TIMEOUT_MS = 45000;
 const ONLINE_WINDOW_MS = 90000;
 
@@ -327,6 +327,8 @@ async function myAcceptOrDecline(roomId, accept) {
             updatedAt: serverTimestamp(),
         });
     });
+    // ✅ 내가 '취소'를 누른 경우에만 즉시 패널티 부과
+    if (!accept) { await applyPenalty({ kind: 'early_decline' }); }
 }
 async function waitStartDecision(roomId, timeoutSec = 30) {
     const ref = doc(db, "rooms", roomId);
@@ -361,6 +363,8 @@ async function myStartYesOrNo(roomId, yes) {
             updatedAt: serverTimestamp(),
         });
     });
+    // ✅ 내가 '아니오'를 누른 경우에만 즉시 패널티 부과
+    if (!yes) { await applyPenalty({ kind: 'start_decline' }); }
 }
 function gotoRoom(roomId) { location.href = `chat.html?room=${encodeURIComponent(roomId)}`; }
 
