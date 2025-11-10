@@ -69,12 +69,19 @@
             flex-wrap: wrap
         }
 
+        /* ✅ 커뮤니티와 동일한 익명 체크 스타일 */
         .anon-wrap {
-            display: flex;
+            display: inline-flex;
             align-items: center;
             gap: 6px;
-            margin-top: 8px
+            margin-top: 8px;
+            justify-content: flex-start;
+            white-space: nowrap;
         }
+
+            .anon-wrap input {
+                margin: 0
+            }
     </style>
 </head>
 <body>
@@ -85,7 +92,7 @@
 
     <div class="container">
         <div class="header" style="margin-bottom:12px">
-            <div class="logo">🏫</div>
+            <div class="logo">🍚</div>
             <h1 class="title">혼밥러 · 홈</h1>
         </div>
 
@@ -104,7 +111,10 @@
                 <input id="quickBody" type="text" placeholder="내용 한 줄 (커뮤니티에 올라가요)" />
                 <button id="quickPostBtn" class="btn" style="width:auto;min-width:120px">등록</button>
             </div>
-            <label class="anon-wrap"><input id="quickAnon" type="checkbox" /><span class="muted-sm">익명으로 올리기</span></label>
+
+            <!-- ✅ 커뮤니티와 동일: 왼쪽 정렬 + 가로 라벨 '익명' -->
+            <label class="anon-wrap"><input id="quickAnon" type="checkbox" /><span class="muted-sm">익명</span></label>
+
             <p id="quickMsg" class="status"></p>
             <div class="muted-sm">전체 글쓰기는 <a href="community.html">커뮤니티</a>에서 할 수 있어요.</div>
         </div>
@@ -170,14 +180,14 @@
                 const card = document.createElement("div");
                 card.className = "post-card";
                 card.innerHTML = `
-                <div class="post-title">${esc(p.title)}</div>
-                <div class="post-meta">
-                  <span>${esc(display)}</span><span>·</span>
-                  <span>${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</span>
-                  <span>·</span><span>좋아요 <b class="likecnt">0</b></span>
-                </div>
-                <div class="muted-sm" style="margin-top:6px">${esc((p.body || "").slice(0, 100))}${(p.body || "").length > 100 ? "…" : ""}</div>
-                <div class="nav" style="margin-top:10px"><a class="link-btn" href="community.html">댓글/상세 보기</a></div>`;
+                        <div class="post-title">${esc(p.title)}</div>
+                        <div class="post-meta">
+                          <span>${esc(display)}</span><span>·</span>
+                          <span>${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</span>
+                          <span>·</span><span>좋아요 <b class="likecnt">0</b></span>
+                        </div>
+                        <div class="muted-sm" style="margin-top:6px">${esc((p.body || "").slice(0, 100))}${(p.body || "").length > 100 ? "…" : ""}</div>
+                        <div class="nav" style="margin-top:10px"><a class="link-btn" href="community.html">댓글/상세 보기</a></div>`;
                 const canManage = IS_ADMIN || ((p.authorEmail || "").toLowerCase() === MY_EMAIL);
                 if (canManage) {
                     const nav = card.querySelector(".nav");
