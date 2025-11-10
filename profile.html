@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>혼밥러 · 프로필</title>
     <link rel="stylesheet" href="style.css" />
-    <!-- (원래 있던) firebase.js 로더는 아래로 이동 -->
 </head>
 <body>
     <!-- ✅ 로그아웃은 이 버튼 하나만 존재해야 합니다 -->
@@ -15,13 +14,15 @@
 
     <div class="container">
         <header class="page-header">
-            <h1 class="title">🍱 혼밥러 · 프로필</h1>
+            <h1 class="title">🍚 혼밥러 · 프로필</h1>
         </header>
 
         <div class="card">
             <p class="muted">로그인 이메일: <span id="loginEmail">(익명)</span></p>
+            <!-- ⬇️ 패널티 현황 -->
+            <p class="muted">패널티: <b id="penaltyInfo">0 / 5</b></p>
 
-            <!-- ✅ 입력 순서만 재배치: 닉네임 → 학번 → 나이 → 성별 → 학과 → MBTI → 콘텐츠 → 공강 -->
+            <!-- 입력 순서 동일 -->
             <label class="label">닉네임</label>
             <input id="nickname" class="input" type="text" placeholder="예: 서준" />
 
@@ -47,7 +48,6 @@
             <label class="label">혼밥 때 주요 소비 콘텐츠</label>
             <input id="content" class="input" type="text" placeholder="예: 유튜브, 음악" />
 
-            <!-- ✅ 공강시간(문장형 입력) — 순서상 마지막 -->
             <label class="label">공강시간(문장형 입력)</label>
             <input id="freeText" class="input" type="text" placeholder="예: 월 12-15, 화 3-4" />
 
@@ -55,24 +55,14 @@
             <p id="status" class="status muted" style="margin-top:8px;"></p>
         </div>
 
-        <!-- ✅ 위치만 그대로 유지 -->
         <div class="row between" style="margin-top:16px; transform: translateY(-0.7cm);">
-            <a class="btn outline"
-               href="community.html"
-               style="width:auto !important; display:inline-flex !important; padding:6px 12px; font-size:14px;">
-                커뮤니티
-            </a>
-            <a class="btn outline"
-               href="index.html"
-               style="width:auto !important; display:inline-flex !important; padding:6px 12px; font-size:14px;">
-                홈
-            </a>
+            <a class="btn outline" href="community.html" style="width:auto !important; display:inline-flex !important; padding:6px 12px; font-size:14px;">커뮤니티</a>
+            <a class="btn outline" href="index.html" style="width:auto !important; display:inline-flex !important; padding:6px 12px; font-size:14px;">홈</a>
         </div>
     </div>
 
-    <!-- ✅ 순서 유지: config.js → firebase.js → 페이지 스크립트 -->
-    <script src="config.js?v=26"></script>
-    <script type="module" src="./firebase.js?v=26"></script>
+    <script src="config.js?v=27"></script>
+    <script type="module" src="./firebase.js?v=29"></script>
 
     <script type="module">
         const $ = (id) => document.getElementById(id);
@@ -87,6 +77,7 @@
         const nickname = $('nickname');
         const loginEmail = $('loginEmail');
         const statusEl = $('status');
+        const penaltyInfo = $('penaltyInfo');
 
         const fbReady = window.fbReady || Promise.resolve(window.fb);
 
@@ -95,21 +86,17 @@
             statusEl.className = 'status ' + (ok ? 'ok' : 'err');
         }
 
-        // ✅ MBTI: 대문자만, 최대 4자
         mbti.addEventListener('input', () => {
             let v = (mbti.value || '').toUpperCase().replace(/[^A-Z]/g, '');
             if (v.length > 4) v = v.slice(0, 4);
             mbti.value = v;
         });
-
-        // 붙여넣기에도 동일 제한 적용
         mbti.addEventListener('paste', (e) => {
             e.preventDefault();
             const text = (e.clipboardData.getData('text') || '')
                 .toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
             document.execCommand('insertText', false, text);
         });
-
 
         async function boot() {
             const fb = await fbReady;
@@ -122,9 +109,8 @@
                 loginEmail.textContent = '(익명)';
             }
 
-            // 저장된 프로필 로드 (원래 동작 유지)
             try {
-                const data = await fb.loadProfile().catch(() => null);
+                const data = await (await fbReady).loadProfile().catch(() => null);
                 if (data) {
                     if (data.nickname) nickname.value = data.nickname;
                     if (data.year != null) year.value = data.year;
@@ -134,6 +120,10 @@
                     if (data.mbti) mbti.value = (data.mbti || "").toUpperCase();
                     if (data.content) content.value = data.content;
                     if (typeof data.freeText === 'string') freeText.value = data.freeText;
+
+                    // ⬇️ 패널티 표기
+                    const n = Number(data.penaltyScore || 0);
+                    penaltyInfo.textContent = `${n} / 5`;
                 }
             } catch (e) {
                 setStatus("프로필을 불러오지 못했어요.", false);
@@ -164,9 +154,7 @@
                 location.href = 'login.html';
             });
         }
-
         boot();
-
     </script>
 </body>
 </html>
