@@ -34,6 +34,15 @@
             background: #121a2b
         }
 
+        .system {
+            align-self: center;
+            background: transparent;
+            color: #9aa0a6;
+            font-size: 12px;
+            padding: 0;
+            max-width: 100%
+        }
+
         .meta {
             font-size: 11px;
             color: #9aa0a6;
@@ -59,12 +68,18 @@
 
         <div class="card">
             <div id="chat" class="chat-wrap"></div>
-            <div class="send-row"><input id="text" type="text" placeholder="메시지를 입력하세요" /><button id="send" class="btn" style="width:auto;min-width:100px">전송</button></div>
+            <div class="send-row">
+                <input id="text" type="text" placeholder="메시지를 입력하세요" />
+                <button id="send" class="btn" style="width:auto;min-width:100px">전송</button>
+            </div>
             <p id="msg" class="status"></p>
         </div>
     </div>
 
-    <script type="module" src="./firebase.js?v=26"></script>
+    <!-- 순서 고정: config → firebase (한 번만 로드), 캐시 무력화 위해 v 올림 -->
+    <script src="config.js?v=27"></script>
+    <script type="module" src="firebase.js?v=29"></script>
+
     <script type="module">
         const $ = (s) => document.querySelector(s);
         const chat = $("#chat"), text = $("#text"), msg = $("#msg");
@@ -80,14 +95,22 @@
             setTimeout(() => location.href = "match.html", 800);
         }
 
-        const esc = (s) => s.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[m]));
+        const esc = (s) => (s || "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[m]));
         const render = (arr) => {
             chat.innerHTML = "";
             const me = window.fb.auth.currentUser?.uid;
             arr.forEach(m => {
+                if (m.system) {                    // ← 시스템 메시지 가운데 표시
+                    const sys = document.createElement("div");
+                    sys.className = "msg system";
+                    sys.textContent = m.text || "";
+                    chat.appendChild(sys);
+                    return;
+                }
                 const div = document.createElement("div");
                 div.className = "msg " + (m.uid === me ? "me" : "other");
-                div.innerHTML = `<div>${esc(m.text || "")}</div><div class="meta">${m.email ? esc(m.email.split("@")[0]) : "익명"}</div>`;
+                const who = m.display || (m.email ? m.email.split("@")[0] : "익명");
+                div.innerHTML = `<div>${esc(m.text || "")}</div><div class="meta">${esc(who)}</div>`;
                 chat.appendChild(div);
             });
             chat.scrollTop = chat.scrollHeight;
@@ -96,12 +119,13 @@
 
         $("#send").addEventListener("click", async () => {
             try { const t = text.value; text.value = ""; await window.fb.sendMessage(roomId, t); }
-            catch (e) { msg.className = "status err"; msg.textContent = "전송 실패: " + e.message; }
+            catch (e) { msg.className = "status err"; msg.textContent = "전송 실패: " + (e.message || e); }
         });
         text.addEventListener("keydown", (e) => { if (e.key === "Enter") $("#send").click(); });
 
-        $("#backBtn").addEventListener("click", async () => {
-            try { localStorage.setItem("lastRoomId", roomId); location.href = "match.html"; } catch { }
+        $("#backBtn").addEventListener("click", () => {
+            try { localStorage.setItem("lastRoomId", roomId); } catch { }
+            location.href = "match.html";
         });
         $("#exitBtn").addEventListener("click", async () => {
             try { $("#exitBtn").disabled = true; await window.fb.leaveRoom(roomId); localStorage.removeItem("lastRoomId"); location.href = "match.html"; }
@@ -111,8 +135,5 @@
 
         window.addEventListener("beforeunload", () => { try { unsub && unsub(); } catch { } });
     </script>
-
-    <script src="config.js?v=26"></script>
-    <script type="module" src="firebase.js?v=26"></script>
 </body>
 </html>
