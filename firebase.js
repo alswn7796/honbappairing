@@ -1,4 +1,4 @@
-// firebase.js v33 — 댓글 + 매칭 + 나가기 알림 + 패널티/이용제한(거절자만)
+// firebase.js v34 — 댓글 + 매칭 + 나가기 알림 + 패널티/이용제한(거절자만) + 좋아요(게시글/댓글)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
     getAuth, onAuthStateChanged, signInAnonymously, signOut,
@@ -39,11 +39,15 @@ const my = {
         const waited = await new Promise(res => {
             let done = false;
             const t = setTimeout(() => { if (!done) { done = true; res(null); } }, 1500);
-            const un = onAuthStateChanged(auth, u => { if (!done && u) { done = true; clearTimeout(t); un(); res(u); } });
+            const un = onAuthStateChanged(auth, u => {
+                if (!done && u) { done = true; clearTimeout(t); un(); res(u); }
+            });
         });
         if (waited) return waited;
         await signInAnonymously(auth);
-        return new Promise(res => { const un = onAuthStateChanged(auth, u => { if (u) { un(); res(u); } }); });
+        return new Promise(res => {
+            const un = onAuthStateChanged(auth, u => { if (u) { un(); res(u); } });
+        });
     },
 
     async logout() { await signOut(auth); },
@@ -75,31 +79,66 @@ async function loginWithEmailPassword(e, p) { return (await signInWithEmailAndPa
 async function signUpWithEmailPassword(e, p) { return (await createUserWithEmailAndPassword(auth, e, p)).user; }
 const KW_EMAIL_RE = /@kw\.ac\.kr$/i;
 const _assertKwEmail = e => { if (!e || !KW_EMAIL_RE.test(e)) throw new Error("광운대 이메일(@kw.ac.kr)만 사용 가능합니다."); };
-const _actionCodeSettings = () => ({ url: `${(typeof window !== 'undefined' && location?.origin) || "http://localhost"}/signup.html`, handleCodeInApp: true });
-async function sendEmailLink(email) { const e = (email || "").trim(); _assertKwEmail(e); await sendSignInLinkToEmail(auth, e, _actionCodeSettings()); try { localStorage.setItem("signup_email", e); } catch { } return true; }
-async function handleEmailLinkIfPresent() { if (!isSignInWithEmailLink(auth, location.href)) return { consumed: false, email: null }; let email = null; try { email = localStorage.getItem("signup_email"); } catch { } if (!email) throw new Error("인증 시작 이메일을 찾을 수 없습니다."); const c = await signInWithEmailLink(auth, email, location.href); return { consumed: true, email: c.user.email || email }; }
-async function setPasswordForCurrentUser(pw) { if (!auth.currentUser) throw new Error("로그인이 필요합니다."); if (typeof pw !== "string" || pw.length < 8) throw new Error("비밀번호는 8자 이상이어야 합니다."); await updatePassword(auth.currentUser, pw); return true; }
+const _actionCodeSettings = () => ({
+    url: `${(typeof window !== 'undefined' && location?.origin) || "http://localhost"}/signup.html`,
+    handleCodeInApp: true
+});
+async function sendEmailLink(email) {
+    const e = (email || "").trim(); _assertKwEmail(e);
+    await sendSignInLinkToEmail(auth, e, _actionCodeSettings());
+    try { localStorage.setItem("signup_email", e); } catch { }
+    return true;
+}
+async function handleEmailLinkIfPresent() {
+    if (!isSignInWithEmailLink(auth, location.href)) return { consumed: false, email: null };
+    let email = null;
+    try { email = localStorage.getItem("signup_email"); } catch { }
+    if (!email) throw new Error("인증 시작 이메일을 찾을 수 없습니다.");
+    const c = await signInWithEmailLink(auth, email, location.href);
+    return { consumed: true, email: c.user.email || email };
+}
+async function setPasswordForCurrentUser(pw) {
+    if (!auth.currentUser) throw new Error("로그인이 필요합니다.");
+    if (typeof pw !== "string" || pw.length < 8) throw new Error("비밀번호는 8자 이상이어야 합니다.");
+    await updatePassword(auth.currentUser, pw);
+    return true;
+}
 
-// --- 커뮤니티(게시글/댓글) ----------------------------------------------------
+// --- 커뮤니티(게시글/댓글/좋아요) ---------------------------------------------
 async function createPost({ title, body, anonymous = false }) {
     await my.requireAuth(); const u = auth.currentUser;
     let authorDisplay = "익명";
     if (!anonymous) {
         const prof = await my.nowProfile().catch(() => null);
         const nick = (prof?.nickname || "").trim();
-        if (nick) authorDisplay = nick; else if (u?.email) authorDisplay = (u.email.split("@")[0] || "익명");
+        if (nick) authorDisplay = nick;
+        else if (u?.email) authorDisplay = (u.email.split("@")[0] || "익명");
     }
-    await addDoc(collection(db, "posts"), { title: title ?? "", body: body ?? "", authorUid: u.uid, authorEmail: u.email ?? null, authorDisplay, isAnonymous: !!anonymous, createdAt: serverTimestamp() });
+    await addDoc(collection(db, "posts"), {
+        title: title ?? "",
+        body: body ?? "",
+        authorUid: u.uid,
+        authorEmail: u.email ?? null,
+        authorDisplay,
+        isAnonymous: !!anonymous,
+        createdAt: serverTimestamp()
+    });
 }
 async function listPosts({ take = 30 } = {}) {
-    try { const qy = query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(take)); const ss = await getDocs(qy); return ss.docs.map(d => ({ id: d.id, ...d.data() })); }
-    catch { return []; }
+    try {
+        const qy = query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(take));
+        const ss = await getDocs(qy);
+        return ss.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch { return []; }
 }
 async function updatePost(postId, { title, body }) {
     await my.requireAuth(); if (!postId) throw new Error("postId가 필요합니다.");
     const ref = doc(db, "posts", postId), s = await getDoc(ref); if (!s.exists()) throw new Error("post not found");
     const p = s.data(); if (!(isAdmin() || p.authorUid === my.uid)) throw new Error("권한이 없습니다.");
-    const patch = {}; if (typeof title === "string") patch.title = title; if (typeof body === "string") patch.body = body; patch.updatedAt = serverTimestamp();
+    const patch = {};
+    if (typeof title === "string") patch.title = title;
+    if (typeof body === "string") patch.body = body;
+    patch.updatedAt = serverTimestamp();
     await updateDoc(ref, patch);
 }
 async function deletePost(postId) {
@@ -108,11 +147,102 @@ async function deletePost(postId) {
     const p = s.data(); if (!(isAdmin() || p.authorUid === my.uid)) throw new Error("권한이 없습니다.");
     await deleteDoc(ref);
 }
-function onLikeCount(postId, cb) { const qy = collection(db, "posts", postId, "likes"); return onSnapshot(qy, ss => cb(ss.size)); }
+
+// 🔼 게시글 좋아요 카운트
+function onLikeCount(postId, cb) {
+    const qy = collection(db, "posts", postId, "likes");
+    return onSnapshot(qy, ss => cb(ss.size));
+}
+
+// 🔼 게시글 좋아요 토글
+async function togglePostLike(postId) {
+    if (!postId) throw new Error("postId가 필요합니다.");
+    await my.requireAuth();
+    const uid = my.uid;
+    const ref = doc(db, "posts", postId, "likes", uid);
+    const s = await getDoc(ref);
+    if (s.exists()) {
+        await deleteDoc(ref);
+    } else {
+        await setDoc(ref, {
+            uid,
+            createdAt: serverTimestamp()
+        });
+    }
+}
+
 // 댓글
-async function listComments(postId, { take = 50 } = {}) { if (!postId) throw new Error("postId가 필요합니다."); await my.requireAuth(); try { const qy = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"), limit(take)); const ss = await getDocs(qy); return ss.docs.map(d => ({ id: d.id, ...d.data() })); } catch { return []; } }
-async function addComment(postId, { text, anonymous = false }) { if (!postId) throw new Error("postId가 필요합니다."); await my.requireAuth(); const u = auth.currentUser; let authorDisplay = "익명"; if (!anonymous) { try { const prof = await my.nowProfile().catch(() => null); const nick = (prof?.nickname || "").trim(); if (nick) authorDisplay = nick; else if (u?.email) authorDisplay = (u.email.split("@")[0] || "익명"); } catch { } } await addDoc(collection(db, "posts", postId, "comments"), { text: String(text ?? ""), authorUid: u?.uid ?? null, authorEmail: u?.email ?? null, authorDisplay, isAnonymous: !!anonymous, createdAt: serverTimestamp() }); }
-async function deleteComment(postId, commentId) { if (!postId || !commentId) throw new Error("postId/commentId가 필요합니다."); await my.requireAuth(); const ref = doc(db, "posts", postId, "comments", commentId), s = await getDoc(ref); if (!s.exists()) return; const c = s.data(); const me = my.uid; const myEmail = (auth.currentUser?.email || "").toLowerCase(); const isOwner = (c.authorUid === me) || ((c.authorEmail || "").toLowerCase() === myEmail); if (!(isAdmin() || isOwner)) throw new Error("권한이 없습니다."); await deleteDoc(ref); }
+async function listComments(postId, { take = 50 } = {}) {
+    if (!postId) throw new Error("postId가 필요합니다.");
+    await my.requireAuth();
+    try {
+        const qy = query(
+            collection(db, "posts", postId, "comments"),
+            orderBy("createdAt", "asc"),
+            limit(take)
+        );
+        const ss = await getDocs(qy);
+        return ss.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch { return []; }
+}
+async function addComment(postId, { text, anonymous = false }) {
+    if (!postId) throw new Error("postId가 필요합니다.");
+    await my.requireAuth();
+    const u = auth.currentUser;
+    let authorDisplay = "익명";
+    if (!anonymous) {
+        try {
+            const prof = await my.nowProfile().catch(() => null);
+            const nick = (prof?.nickname || "").trim();
+            if (nick) authorDisplay = nick;
+            else if (u?.email) authorDisplay = (u.email.split("@")[0] || "익명");
+        } catch { }
+    }
+    await addDoc(collection(db, "posts", postId, "comments"), {
+        text: String(text ?? ""),
+        authorUid: u?.uid ?? null,
+        authorEmail: u?.email ?? null,
+        authorDisplay,
+        isAnonymous: !!anonymous,
+        createdAt: serverTimestamp()
+    });
+}
+async function deleteComment(postId, commentId) {
+    if (!postId || !commentId) throw new Error("postId/commentId가 필요합니다.");
+    await my.requireAuth();
+    const ref = doc(db, "posts", postId, "comments", commentId);
+    const s = await getDoc(ref); if (!s.exists()) return;
+    const c = s.data();
+    const me = my.uid;
+    const myEmail = (auth.currentUser?.email || "").toLowerCase();
+    const isOwner = (c.authorUid === me) || ((c.authorEmail || "").toLowerCase() === myEmail);
+    if (!(isAdmin() || isOwner)) throw new Error("권한이 없습니다.");
+    await deleteDoc(ref);
+}
+
+// 🔼 댓글 좋아요 카운트
+function onCommentLikeCount(postId, commentId, cb) {
+    if (!postId || !commentId) return () => { };
+    const qy = collection(db, "posts", postId, "comments", commentId, "likes");
+    return onSnapshot(qy, ss => cb(ss.size));
+}
+
+// 🔼 댓글 좋아요 토글
+async function toggleCommentLike(postId, commentId) {
+    if (!postId || !commentId) throw new Error("postId/commentId가 필요합니다.");
+    await my.requireAuth();
+    const uid = my.uid;
+    const ref = doc(db, "posts", postId, "comments", commentId, "likes", uid);
+    const s = await getDoc(ref);
+    if (s.exists()) {
+        await deleteDoc(ref);
+    } else {
+        await setDoc(ref, {
+            uid,
+            createdAt: serverTimestamp()
+        });
+    }
+}
 
 // --- 패널티/이용제한 -----------------------------------------------------------
 async function _checkBanOrThrow() {
@@ -147,7 +277,11 @@ async function applyPenalty() {
 const MATCH_TIMEOUT_MS = 45000;
 const ONLINE_WINDOW_MS = 90000;
 
-async function leaveQueueByUid(uid) { const q = query(collection(db, "matchQueue"), where("uid", "==", uid)); const ss = await getDocs(q); await Promise.all(ss.docs.map(d => deleteDoc(d.ref))); }
+async function leaveQueueByUid(uid) {
+    const q = query(collection(db, "matchQueue"), where("uid", "==", uid));
+    const ss = await getDocs(q);
+    await Promise.all(ss.docs.map(d => deleteDoc(d.ref)));
+}
 async function enterQueue(options) {
     await my.requireAuth(); const prof = await my.nowProfile() || {};
     const ref = doc(collection(db, "matchQueue"));
@@ -155,61 +289,138 @@ async function enterQueue(options) {
         uid: my.uid, email: auth.currentUser.email ?? null,
         createdAt: serverTimestamp(), lastActive: serverTimestamp(),
         status: "waiting",
-        pref: { year: prof.year ?? null, age: prof.age ?? null, gender: prof.gender ?? null, major: prof.major ?? null, freeText: prof.freeText ?? "", ...options },
+        pref: {
+            year: prof.year ?? null,
+            age: prof.age ?? null,
+            gender: prof.gender ?? null,
+            major: prof.major ?? null,
+            freeText: prof.freeText ?? "",
+            ...options
+        },
         isBot: !!prof.isBot, roomId: null,
     });
     return ref.id;
 }
 async function findOpponent(myDocId) {
-    const myRef = doc(db, "matchQueue", myDocId); const md = await getDoc(myRef); if (!md.exists()) throw new Error("대기열 문서가 없어요.");
+    const myRef = doc(db, "matchQueue", myDocId);
+    const md = await getDoc(myRef); if (!md.exists()) throw new Error("대기열 문서가 없어요.");
     const me = md.data();
-    const qy = query(collection(db, "matchQueue"), where("status", "==", "waiting"), orderBy("createdAt", "asc"), limit(25));
+    const qy = query(
+        collection(db, "matchQueue"),
+        where("status", "==", "waiting"),
+        orderBy("createdAt", "asc"),
+        limit(25)
+    );
     const snaps = await getDocs(qy);
     const now = Date.now();
-    const freeOverlapCheck = (_A, B) => { if (!me.pref?.freeOverlap) return true; const pick = s => (s || "").replace(/\s/g, ""); const a = pick(me.pref?.freeText); const b = pick(B?.pref?.freeText); if (!a || !b) return false; return ['월', '화', '수', '목', '금', '토', '일'].some(ch => a.includes(ch) && b.includes(ch)); };
+
+    const freeOverlapCheck = (_A, B) => {
+        if (!me.pref?.freeOverlap) return true;
+        const pick = s => (s || "").replace(/\s/g, "");
+        const a = pick(me.pref?.freeText);
+        const b = pick(B?.pref?.freeText);
+        if (!a || !b) return false;
+        return ['월', '화', '수', '목', '금', '토', '일'].some(ch => a.includes(ch) && b.includes(ch));
+    };
+
     for (const d of snaps.docs) {
         if (d.id === myDocId) continue;
         const you = d.data();
         if (you.uid === me.uid) continue;
         if (you.status !== 'waiting') continue;
-        if (me.pref?.onlineOnly) { const last = (you.lastActive?.toDate?.() || new Date(0)).getTime(); if (now - last > ONLINE_WINDOW_MS) continue; }
+
+        if (me.pref?.onlineOnly) {
+            const last = (you.lastActive?.toDate?.() || new Date(0)).getTime();
+            if (now - last > ONLINE_WINDOW_MS) continue;
+        }
+
         const same = (a, b) => (a != null && b != null && a === b);
         if (me.pref?.yearSame && !same(me.pref?.year, you.pref?.year)) continue;
         if (me.pref?.majorSame && !same(me.pref?.major, you.pref?.major)) continue;
         if (me.pref?.ageSame && !same(me.pref?.age, you.pref?.age)) continue;
         if (me.pref?.genderSame && !same(me.pref?.gender, you.pref?.gender)) continue;
         if (!freeOverlapCheck(me.pref?.freeText, you)) continue;
+
         return { id: d.id, you };
     }
     return null;
 }
+
+// ✅ 방 생성 시 기본 상태: pendingAccept + 수락 투표 정보는 비어 있음
 async function createRoomAndInvite(myDocId, oppDocId, oppUid) {
+    const members = Array.from(new Set([my.uid, oppUid])).filter(Boolean);
     const roomRef = doc(collection(db, "rooms"));
     await setDoc(roomRef, {
-        members: Array.from(new Set([my.uid, oppUid])).filter(Boolean),
+        members,
         createdAt: serverTimestamp(),
         phase: "pendingAccept",
         invites: { to: oppDocId, at: serverTimestamp(), accepted: null },
+        acceptVoted: [],
+        acceptYes: [],
+        declinedBy: null,
     });
-    await updateDoc(doc(db, "matchQueue", myDocId), { status: "matched", roomId: roomRef.id, lastActive: serverTimestamp() });
-    await updateDoc(doc(db, "matchQueue", oppDocId), { status: "matched", roomId: roomRef.id, lastActive: serverTimestamp() });
+    await updateDoc(doc(db, "matchQueue", myDocId), {
+        status: "matched", roomId: roomRef.id, lastActive: serverTimestamp()
+    });
+    await updateDoc(doc(db, "matchQueue", oppDocId), {
+        status: "matched", roomId: roomRef.id, lastActive: serverTimestamp()
+    });
     return roomRef;
 }
 
 // --- 수락 단계 ---------------------------------------------------------------
+// ✅ 양쪽 모두 수락해야만 phase가 'startCheck'로 이동
 async function myAcceptOrDecline(roomId, accept) {
     const ref = doc(db, "rooms", roomId);
     await runTransaction(db, async tx => {
         const s = await tx.get(ref); if (!s.exists()) throw new Error("room not found");
-        const r = s.data(); if (r.phase !== 'pendingAccept') return;
-        tx.update(ref, {
-            members: Array.from(new Set([...(r.members || []), my.uid])),
-            phase: accept ? 'startCheck' : 'declined',
-            declinedBy: accept ? null : my.uid,   // ← 누가 거절했는지 기록
+        const r = s.data();
+
+        // 이미 다른 결과가 난 방이면 더 이상 처리하지 않음
+        if (r.phase !== 'pendingAccept') return;
+
+        const members = new Set(r.members || []);
+        members.add(my.uid);
+
+        const voted = new Set(r.acceptVoted || []);
+        const yesSet = new Set(r.acceptYes || []);
+
+        voted.add(my.uid);
+        if (accept) yesSet.add(my.uid);
+
+        let phase = r.phase;
+        let declinedBy = r.declinedBy || null;
+
+        if (!accept) {
+            // 내가 거절한 경우: 즉시 declined
+            phase = 'declined';
+            declinedBy = my.uid;
+        } else {
+            // 수락한 경우: 모든 멤버가 수락했는지 체크
+            const everyoneVoted = Array.from(members).every(u => voted.has(u));
+            const everyoneYes = everyoneVoted && Array.from(members).every(u => yesSet.has(u));
+            if (everyoneYes) {
+                phase = 'startCheck';
+                declinedBy = null;
+            } else {
+                // 아직 상대 응답 안 온 상태 → pendingAccept 유지
+                phase = 'pendingAccept';
+            }
+        }
+
+        const patch = {
+            members: Array.from(members),
+            acceptVoted: Array.from(voted),
+            acceptYes: Array.from(yesSet),
             updatedAt: serverTimestamp(),
-        });
+        };
+        if (phase !== r.phase) patch.phase = phase;
+        if (declinedBy !== null) patch.declinedBy = declinedBy;
+
+        tx.update(ref, patch);
     });
 }
+
 async function waitInviteDecision(roomId, timeoutSec = 30) {
     const ref = doc(db, "rooms", roomId);
     return new Promise(resolve => {
@@ -231,7 +442,6 @@ async function myStartYesOrNo(roomId, yes) {
         const r = s.data(); if (r.phase !== 'startCheck') return;
 
         if (!yes) {
-            // ❗️즉시 종료 + 거절자 기록
             tx.update(ref, {
                 startVoted: Array.from(new Set([...(r.startVoted || []), my.uid])),
                 startYes: Array.from(new Set([...(r.startYes || [])])),
@@ -242,8 +452,8 @@ async function myStartYesOrNo(roomId, yes) {
             return;
         }
 
-        // yes인 경우 기존 합의 로직 유지
-        const voted = new Set(r.startVoted || []); const yesSet = new Set(r.startYes || []);
+        const voted = new Set(r.startVoted || []);
+        const yesSet = new Set(r.startYes || []);
         voted.add(my.uid); yesSet.add(my.uid);
         const all = new Set(r.members || []);
         const everyoneVoted = Array.from(all).every(u => voted.has(u));
@@ -254,8 +464,7 @@ async function myStartYesOrNo(roomId, yes) {
             phase: everyoneVoted ? (everyoneYes ? 'chatting' : 'startDeclined') : 'startCheck',
             updatedAt: serverTimestamp(),
         };
-        // 만약 이미 다른 쪽이 No였다면 안전하게 유지
-        if (everyoneVoted && !everyoneYes && !r.startDeclinedBy) patch.startDeclinedBy = my.uid;
+        if (everyoneVoted && !everyoneYes && !r.startDeclinedBy) patch.startDeclinedBy = myUid;
         tx.update(ref, patch);
     });
 }
@@ -275,7 +484,10 @@ async function waitStartDecision(roomId, timeoutSec = 30) {
 function gotoRoom(roomId) { location.href = `chat.html?room=${encodeURIComponent(roomId)}`; }
 
 // --- 종료/프레즌스/채팅 -------------------------------------------------------
-async function cancelMatching() { if (!auth.currentUser) return; await leaveQueueByUid(my.uid); }
+async function cancelMatching() {
+    if (!auth.currentUser) return;
+    await leaveQueueByUid(my.uid);
+}
 async function markLeaving() {
     if (!auth.currentUser) return;
     const qy = query(collection(db, "matchQueue"), where("uid", "==", my.uid), limit(1));
@@ -285,19 +497,35 @@ async function markLeaving() {
 async function assertRoomMember(roomId) {
     await my.requireAuth();
     const s = await getDoc(doc(db, "rooms", roomId)); if (!s.exists()) throw new Error("room not found");
-    const r = s.data(); if (!Array.isArray(r.members) || !r.members.includes(my.uid)) throw new Error("you are not a member of this room");
+    const r = s.data();
+    if (!Array.isArray(r.members) || !r.members.includes(my.uid)) throw new Error("you are not a member of this room");
     return true;
 }
 function onMessages(roomId, cb) {
-    const qy = query(collection(db, "rooms", roomId, "messages"), orderBy("createdAt", "asc"), limit(200));
+    const qy = query(
+        collection(db, "rooms", roomId, "messages"),
+        orderBy("createdAt", "asc"),
+        limit(200)
+    );
     return onSnapshot(qy, ss => cb(ss.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
 async function sendMessage(roomId, text) {
     await my.requireAuth();
     const t = (text || "").trim(); if (!t) return;
     let display = "익명";
-    try { const prof = await my.nowProfile().catch(() => null); const nick = (prof?.nickname || "").trim(); if (nick) display = nick; else if (auth.currentUser?.email) display = (auth.currentUser.email.split("@")[0] || "익명"); } catch { }
-    await addDoc(collection(db, "rooms", roomId, "messages"), { text: t, uid: my.uid, email: auth.currentUser?.email ?? null, display, createdAt: serverTimestamp() });
+    try {
+        const prof = await my.nowProfile().catch(() => null);
+        const nick = (prof?.nickname || "").trim();
+        if (nick) display = nick;
+        else if (auth.currentUser?.email) display = (auth.currentUser.email.split("@")[0] || "익명");
+    } catch { }
+    await addDoc(collection(db, "rooms", roomId, "messages"), {
+        text: t,
+        uid: my.uid,
+        email: auth.currentUser?.email ?? null,
+        display,
+        createdAt: serverTimestamp()
+    });
 }
 async function leaveRoom(roomId) {
     await my.requireAuth();
@@ -314,7 +542,11 @@ async function leaveRoom(roomId) {
     });
     await leaveQueueByUid(my.uid);
     if (leftTo > 0) {
-        await addDoc(collection(db, "rooms", roomId, "messages"), { text: "상대방이 채팅방을 나갔습니다.", system: true, createdAt: serverTimestamp() });
+        await addDoc(collection(db, "rooms", roomId, "messages"), {
+            text: "상대방이 채팅방을 나갔습니다.",
+            system: true,
+            createdAt: serverTimestamp()
+        });
     }
 }
 
@@ -326,8 +558,10 @@ const api = {
     sendEmailLink, handleEmailLinkIfPresent, setPasswordForCurrentUser,
     loadProfile: my.nowProfile, saveProfile: my.saveProfile,
 
-    createPost, listPosts, updatePost, deletePost, onLikeCount,
+    createPost, listPosts, updatePost, deletePost,
+    onLikeCount, togglePostLike,
     listComments, addComment, deleteComment,
+    onCommentLikeCount, toggleCommentLike,
 
     startMatching: async (options) => {
         await my.requireAuth();
@@ -366,8 +600,18 @@ const api = {
     startWithTestBot: async () => {
         await my.requireAuth(); await leaveQueueByUid(my.uid);
         const roomRef = doc(collection(db, "rooms"));
-        await setDoc(roomRef, { members: [my.uid, "__testbot__"], createdAt: serverTimestamp(), phase: "chatting" });
-        await addDoc(collection(db, "rooms", roomRef.id, "messages"), { text: "테스트봇 연결 완료 ✅ 채팅 입력 테스트 해보세요.", uid: "__testbot__", email: "bot", display: "테스트봇", createdAt: serverTimestamp() });
+        await setDoc(roomRef, {
+            members: [my.uid, "__testbot__"],
+            createdAt: serverTimestamp(),
+            phase: "chatting"
+        });
+        await addDoc(collection(db, "rooms", roomRef.id, "messages"), {
+            text: "테스트봇 연결 완료 ✅ 채팅 입력 테스트 해보세요.",
+            uid: "__testbot__",
+            email: "bot",
+            display: "테스트봇",
+            createdAt: serverTimestamp()
+        });
         return { id: roomRef.id };
     },
 
