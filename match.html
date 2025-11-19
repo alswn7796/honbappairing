@@ -13,7 +13,7 @@
             <h1 class="title">🍚 혼밥러 · 매칭</h1>
             <p class="muted" style="margin-top:4px">
                 “혼밥러 찾기”를 누르면 대기열에 들어가고,<br />
-                매칭되면 <b>1단계: 수락/거절 → 2단계: 채팅 시작(Y/n)</b> 절차를 진행합니다.
+                매칭되면 <b>1단계: 수락/거절</b> 절차를 진행합니다.
             </p>
         </header>
 
@@ -41,7 +41,7 @@
                 <button id="acceptNoBtn" class="btn outline" style="width:auto;min-width:120px">거절</button>
             </div>
 
-            <!-- 2단계: 채팅 시작(Y/n) UI (현재는 내부 로직만, 화면엔 미사용) -->
+            <!-- 2단계 UI는 사용하지 않지만 기존 코드 유지 -->
             <div id="startArea" class="row" style="gap:12px; margin-top:8px; display:none">
                 <button id="startYesBtn" class="btn" style="width:auto;min-width:140px">채팅 시작 (Y)</button>
                 <button id="startNoBtn" class="btn outline" style="width:auto;min-width:140px">채팅 시작 안 함 (N)</button>
@@ -211,20 +211,8 @@
                 setupAcceptUI();
             } catch (e) {
                 console.error(e);
-                const msg = e?.message || String(e || '');
-
-                // ✅ 이용 제한일 때는 사용자에게 안내 문구를 보여주고, 그 문구를 유지한다.
-                if (msg.includes('이용 제한 중입니다')) {
-                    say('패널티 5회 누적으로 1시간동안 이용이 제한됩니다.', false);
-                } else {
-                    say('시작 실패: ' + msg, false);
-                }
-
-                // 메시지는 그대로 둔 채로 상태만 초기화
-                finding = false;
-                phase = 'idle';
-                hideAllSteps();
-                setFindingUI(false);
+                say('시작 실패: ' + (e?.message || e), false);
+                cleanup();
             }
         }
 
@@ -258,11 +246,9 @@
 
                 if (!accepted) {
                     if (declinedBy === myUid) {
-                        // 내가 거절
                         await fb.applyPenalty().catch(() => { });
                         say('거절하여 패널티가 1회 부과되었습니다.', false);
                     } else {
-                        // 상대방이 거절
                         say('상대방이 거절하였습니다.', false);
                     }
                     phase = 'idle';
@@ -271,12 +257,20 @@
                     return;
                 }
 
-                // ✅ 양쪽 모두 수락 완료 → 바로 채팅방으로 이동
+                // ✅ 양쪽 모두 수락(= 채팅 시작) → 매칭 스코어 1회 증가 후 채팅방 이동
                 phase = 'idle';
                 setFindingUI(false);
+
                 try {
-                    localStorage.setItem('lastRoomId', roomId);
-                } catch { }
+                    const res = await fb.addMatchSuccess();
+                    if (res && res.rewarded) {
+                        alert('축하합니다! 매칭 스코어 별 3개 달성! 소정의 선물이 제공됩니다. 🎉');
+                    }
+                } catch {
+                    // 매칭 스코어 업데이트는 실패해도 채팅은 진행
+                }
+
+                try { localStorage.setItem('lastRoomId', roomId); } catch { }
                 say('채팅방으로 이동합니다…');
                 await fb.gotoRoom(roomId);
                 return;
@@ -289,60 +283,6 @@
                 setFindingUI(false);
             } finally {
                 disableAcceptBtns(false);
-            }
-        }
-
-        function setupStartUI() {
-            if (!currentRoomId || !fbInstance) return;
-            hideAllSteps();
-            startArea.style.display = 'flex';
-            disableStartBtns(false);
-            say('매칭 성공! 채팅 시작 여부를 선택해주세요.');
-
-            startYesBtn.onclick = () => handleStart(true);
-            startNoBtn.onclick = () => handleStart(false);
-        }
-
-        async function handleStart(yes) {
-            if (phase !== 'start' || !fbInstance || !currentRoomId) return;
-            const fb = fbInstance;
-            const roomId = currentRoomId;
-
-            try {
-                disableStartBtns(true);
-                if (yes) {
-                    await fb.startYes(roomId);
-                } else {
-                    await fb.startNo(roomId);
-                }
-
-                say('상대방의 채팅 시작 여부를 기다리는 중입니다…');
-                const { go, declinedBy } = await fb.readyToChat(roomId, 30);
-                startArea.style.display = 'none';
-
-                if (go) {
-                    localStorage.setItem('lastRoomId', roomId);
-                    say('채팅방으로 이동합니다…');
-                    await fb.gotoRoom(roomId);
-                } else {
-                    if (declinedBy === myUid) {
-                        await fb.applyPenalty().catch(() => { });
-                        say('채팅 시작을 거절하여 패널티 1회가 부여되었습니다.', false);
-                    } else {
-                        say('상대방이 채팅을 거절했습니다.', false);
-                    }
-                    phase = 'idle';
-                    currentRoomId = null;
-                    setFindingUI(false);
-                }
-            } catch (e) {
-                console.error(e);
-                say('채팅 시작 단계에서 오류가 발생했습니다: ' + (e?.message || e), false);
-                phase = 'idle';
-                currentRoomId = null;
-                setFindingUI(false);
-            } finally {
-                disableStartBtns(false);
             }
         }
 
