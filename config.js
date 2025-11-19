@@ -9,4 +9,7 @@ window.firebaseConfig = {
 };
 
 // ✅ 관리자 이메일 목록(원하면 여러 개 추가 가능)
-window.ADMIN_EMAILS = ["qkdtjwns123@kw.ac.kr"];
+window.ADMIN_EMAILS = [
+    "qkdtjwns123@kw.ac.kr",
+    "alswn7796@kw.ac.kr"
+];
