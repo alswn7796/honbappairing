@@ -19,7 +19,8 @@
 
         <div class="card">
             <p class="muted">로그인 이메일: <span id="loginEmail">(익명)</span></p>
-            <!-- ⬇️ 패널티 현황 -->
+            <!-- ⬇️ 매칭 스코어 / 패널티 현황 -->
+            <p class="muted">매칭 스코어: <span id="matchScore">☆☆☆ (0회)</span></p>
             <p class="muted">패널티: <b id="penaltyInfo">0 / 5</b></p>
 
             <!-- ✅ 패널티 초기화 버튼 (기본은 숨김, 관리자일 때만 JS로 보여줌) -->
@@ -88,6 +89,7 @@
         const statusEl = $('status');
         const penaltyInfo = $('penaltyInfo');
         const resetPenaltyBtn = $('resetPenaltyBtn');
+        const matchScore = $('matchScore');
 
         const fbReady = window.fbReady || Promise.resolve(window.fb);
 
@@ -98,6 +100,16 @@
         function setStatus(msg, ok = true) {
             statusEl.textContent = msg || '';
             statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+        }
+
+        function renderStars(n) {
+            const max = 3;
+            const cnt = Math.max(0, Math.min(max, Number(n) || 0));
+            let s = '';
+            for (let i = 0; i < max; i++) {
+                s += i < cnt ? '★' : '☆';
+            }
+            return s;
         }
 
         mbti.addEventListener('input', () => {
@@ -122,7 +134,6 @@
                 const email = u?.email || savedEmail || '(익명)';
                 loginEmail.textContent = email;
 
-                // ✅ 관리자 판별
                 isAdmin = fb.isAdminEmail?.(email) === true;
                 if (isAdmin && resetPenaltyBtn) {
                     resetPenaltyBtn.style.display = 'inline-flex';
@@ -146,12 +157,25 @@
                     if (data.content) content.value = data.content;
                     if (typeof data.freeText === 'string') freeText.value = data.freeText;
 
-                    // ⬇️ 패널티 표기
                     const n = Number(data.penaltyScore || 0);
                     penaltyInfo.textContent = `${n} / 5`;
+
+                    const mc = Number(data.matchCount || 0);
+                    const ms = Number(data.matchStars || 0);
+                    if (matchScore) {
+                        const starsText = renderStars(ms);
+                        matchScore.textContent = `${starsText} (${mc}회)`;
+                    }
+                } else {
+                    if (matchScore) {
+                        matchScore.textContent = `${renderStars(0)} (0회)`;
+                    }
                 }
             } catch (e) {
                 setStatus("프로필을 불러오지 못했어요.", false);
+                if (matchScore) {
+                    matchScore.textContent = `${renderStars(0)} (0회)`;
+                }
             }
 
             // ✅ 패널티 초기화 버튼 동작
