@@ -22,7 +22,8 @@ html, body {
 
 body {
     margin: 0;
-    background: radial-gradient(1200px 600px at 10% -10%, #1b2132 0%, transparent 60%), radial-gradient(900px 500px at 110% 10%, #16203b 0%, transparent 60%), var(--bg);
+    /* 🔽 여기만 수정: 복잡한 그라디언트 제거하고 단색으로 통일 */
+    background: var(--bg);
     color: var(--fg);
     font-family: ui-sans-serif,system-ui,Segoe UI,Roboto,Apple SD Gothic Neo,Malgun Gothic,sans-serif;
 }
@@ -237,6 +238,7 @@ input, select, textarea {
     gap: 8px;
     flex-wrap: wrap
 }
+
 /* --- profile 전용 로그아웃 FAB 고정/자동 폭 강제 --- */
 #logoutFab {
     position: fixed;
