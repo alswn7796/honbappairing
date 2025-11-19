@@ -44,18 +44,17 @@
 
         /* ✅ 글쓰기 익명 체크: 왼쪽 붙이고 가로 유지 */
         .anon-wrap {
-            display: inline-flex; /* 블록 전체폭이 아니라 내용만 */
+            display: inline-flex;
             align-items: center;
             gap: 6px;
             margin-top: 8px;
             justify-content: flex-start;
-            white-space: nowrap; /* '익명' 줄바꿈 방지 */
+            white-space: nowrap;
         }
 
             .anon-wrap input {
                 margin: 0
             }
-        /* 기본 좌우마진 제거 */
 
         /* ✅ 댓글 UI */
         .comment-wrap {
@@ -84,7 +83,7 @@
             gap: 8px;
             flex-wrap: nowrap;
         }
-            /* 가로 고정 */
+
             .comment-form .c-text {
                 flex: 1 1 240px;
             }
@@ -93,10 +92,9 @@
                 display: inline-flex;
                 align-items: center;
                 gap: 6px;
-                white-space: nowrap; /* '익명' 가로 유지 */
+                white-space: nowrap;
             }
 
-        /* 화면이 아주 좁을 때만 자연스럽게 줄바꿈 허용 */
         @media (max-width: 380px) {
             .comment-form {
                 flex-wrap: wrap;
@@ -107,8 +105,15 @@
 <body>
     <div class="container">
         <div class="topbar">
-            <div class="header" style="margin:0"><div class="logo">🍚</div><h1 class="title">혼밥러 · 커뮤니티</h1></div>
-            <div class="row-wrap"><a class="link-btn" href="match.html">매칭</a><a class="link-btn" href="profile.html">프로필</a><a class="link-btn" href="index.html">홈</a></div>
+            <div class="header" style="margin:0">
+                <div class="logo">🍚</div>
+                <h1 class="title">혼밥러 · 커뮤니티</h1>
+            </div>
+            <div class="row-wrap">
+                <a class="link-btn" href="match.html">매칭</a>
+                <a class="link-btn" href="profile.html">프로필</a>
+                <a class="link-btn" href="index.html">홈</a>
+            </div>
         </div>
 
         <div class="card">
@@ -116,10 +121,12 @@
             <label>제목</label>
             <input id="title" type="text" placeholder="예: 오늘 점심 혼밥 후기" maxlength="120" />
             <label>내용</label>
-            <textarea id="body" rows="6" placeholder="예: 추천 식당/메뉴/시간대 등 자유롭게"></textarea>
+            <textarea id="body" rows="6" placeholder="예: 추천 식당/음악/유튜브/영화/드라마 등 자유롭게"></textarea>
 
-            <!-- ✅ 왼쪽에 가로로 '익명' -->
-            <label class="anon-wrap"><input id="anon" type="checkbox" /><span class="muted-sm">익명</span></label>
+            <label class="anon-wrap">
+                <input id="anon" type="checkbox" />
+                <span class="muted-sm">익명</span>
+            </label>
 
             <div class="row" style="margin-top:8px">
                 <button id="postBtn" class="btn" style="width:auto;min-width:120px">등록</button>
@@ -138,22 +145,55 @@
     </div>
 
     <script src="config.js?v=26"></script>
-    <script type="module" src="./firebase.js?v=26"></script>
+    <script type="module" src="./firebase.js?v=34"></script>
     <script type="module">
+        import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+
         const $ = (s) => document.querySelector(s);
         const list = $("#list"), moreBtn = $("#moreBtn"), countTxt = $("#countTxt"), postBtn = $("#postBtn"),
             postMsg = $("#postMsg"), titleEl = $("#title"), bodyEl = $("#body"), anonEl = $("#anon");
 
-        const esc = (s) => (s || "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[m]));
+        const esc = (s) => (s || "").replace(/[&<>"']/g, m => ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            "\"": "&quot;",
+            "'": "&#39;"
+        }[m]));
+
+        // 🔗 URL을 자동으로 링크로
+        const linkify = (html) =>
+            (html || "").replace(
+                /(https?:\/\/[^\s<]+)/g,
+                '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+            );
+
+        // ✅ 좋아요 버튼 색깔 토글용 공통 함수
+        function applyLikeVisual(btn, liked) {
+            if (!btn) return;
+            btn.style.borderColor = "#ef4444";
+            if (liked) {
+                btn.style.backgroundColor = "#ef4444";
+                btn.style.color = "#ffffff";
+            } else {
+                btn.style.backgroundColor = "#0e1322";
+                btn.style.color = "#ef4444";
+            }
+        }
 
         if (window.fbReady) await window.fbReady;
         await window.fb.requireAuth();
         const cu = window.fb.auth.currentUser;
-        if (!cu || cu.isAnonymous) { alert("로그인이 필요합니다."); location.href = "login.html"; throw new Error("anonymous session"); }
+        if (!cu || cu.isAnonymous) {
+            alert("로그인이 필요합니다.");
+            location.href = "login.html";
+            throw new Error("anonymous session");
+        }
 
         const MY_UID = cu.uid;
         const MY_EMAIL = (cu.email || "").toLowerCase();
         const IS_ADMIN = window.fb.isAdminEmail?.(MY_EMAIL) === true;
+        const db = window.fb.db;
 
         function canEditOrDelete(post) {
             const byUid = post.authorUid && post.authorUid === MY_UID;
@@ -162,21 +202,70 @@
         }
 
         /* ===== 댓글 렌더링 유틸 ===== */
-        function renderCommentItem(c, { canManage, onDelete }) {
+        function renderCommentItem(c, { postId, canManage, onDelete }) {
             const div = document.createElement("div");
             div.className = "comment-item";
             const who = c.authorDisplay || (c.authorEmail ? c.authorEmail.split("@")[0] : "익명");
             const when = c.createdAt?.toDate ? c.createdAt.toDate().toLocaleString() : "";
+
             div.innerHTML = `
                     <div class="comment-meta">${esc(who)} · ${when}</div>
-                    <div class="comment-text">${esc(c.text || "")}</div>
+                    <div class="comment-text">${linkify(esc(c.text || ""))}</div>
+                    <div class="muted-sm" style="margin-top:4px; display:flex; align-items:center; gap:6px;">
+                        <button class="link-btn c-like-btn" style="padding:2px 8px; font-size:11px; border-color:#ef4444; color:#ef4444;">좋아요</button>
+                        <span><b class="c-likecnt">0</b></span>
+                    </div>
                 `;
+
+            // 좋아요 로직 (개수 + 색상)
+            const likeBtn = div.querySelector(".c-like-btn");
+            const likeCntEl = div.querySelector(".c-likecnt");
+
+            if (likeBtn && likeCntEl && window.fb.onCommentLikeCount) {
+                let liked = false;
+                applyLikeVisual(likeBtn, liked);
+
+                // 현재 내가 좋아요 눌렀는지 초기 상태 조회
+                (async () => {
+                    try {
+                        const ref = doc(db, "posts", postId, "comments", c.id, "likes", MY_UID);
+                        const snap = await getDoc(ref);
+                        liked = snap.exists();
+                        applyLikeVisual(likeBtn, liked);
+                    } catch { }
+                })();
+
+                const un = window.fb.onCommentLikeCount(postId, c.id, (n) => {
+                    likeCntEl.textContent = String(n);
+                });
+                window.addEventListener("beforeunload", () => { try { un && un(); } catch { } });
+
+                likeBtn.addEventListener("click", async () => {
+                    try {
+                        likeBtn.disabled = true;
+                        await window.fb.toggleCommentLike(postId, c.id);
+                        liked = !liked;
+                        applyLikeVisual(likeBtn, liked);
+                    } catch (e) {
+                        alert("좋아요 실패: " + (e.message || e));
+                    } finally {
+                        likeBtn.disabled = false;
+                    }
+                });
+            }
+
             if (canManage) {
                 const btn = document.createElement("button");
                 btn.textContent = "삭제";
                 btn.className = "link-btn";
-                btn.style.borderColor = "#ef4444"; btn.style.color = "#ef4444"; btn.style.marginTop = "6px";
-                btn.addEventListener("click", async () => { if (confirm("댓글을 삭제할까요?")) await onDelete().catch(e => alert("삭제 실패: " + (e.message || e))); });
+                btn.style.borderColor = "#ef4444";
+                btn.style.color = "#ef4444";
+                btn.style.marginTop = "6px";
+                btn.addEventListener("click", async () => {
+                    if (confirm("댓글을 삭제할까요?")) {
+                        await onDelete().catch(e => alert("삭제 실패: " + (e.message || e)));
+                    }
+                });
                 div.appendChild(btn);
             }
             return div;
@@ -190,7 +279,10 @@
                     <div class="comment-list"></div>
                     <div class="comment-form">
                         <input class="c-text" type="text" placeholder="댓글을 입력하세요" />
-                        <label class="c-anon-label"><input type="checkbox" class="c-anon" /> <span class="muted-sm">익명</span></label>
+                        <label class="c-anon-label">
+                            <input type="checkbox" class="c-anon" />
+                            <span class="muted-sm">익명</span>
+                        </label>
                         <button class="btn" style="width:auto;min-width:88px">등록</button>
                     </div>
                     <p class="c-msg status"></p>
@@ -207,8 +299,11 @@
                 listEl.innerHTML = "";
                 const items = await window.fb.listComments(post.id, { take: 50 }).catch(() => []);
                 (items || []).forEach(c => {
-                    const canManage = IS_ADMIN || (c.authorUid === MY_UID) || ((c.authorEmail || "").toLowerCase() === MY_EMAIL);
+                    const canManage = IS_ADMIN ||
+                        (c.authorUid === MY_UID) ||
+                        ((c.authorEmail || "").toLowerCase() === MY_EMAIL);
                     const node = renderCommentItem(c, {
+                        postId: post.id,
                         canManage,
                         onDelete: () => window.fb.deleteComment(post.id, c.id).then(reload)
                     });
@@ -216,7 +311,8 @@
                 });
                 if (!listEl.children.length) {
                     const empty = document.createElement("div");
-                    empty.className = "muted-sm"; empty.textContent = "첫 댓글을 남겨보세요!";
+                    empty.className = "muted-sm";
+                    empty.textContent = "첫 댓글을 남겨보세요!";
                     listEl.appendChild(empty);
                 }
             }
@@ -224,16 +320,24 @@
 
             btnEl.addEventListener("click", async () => {
                 try {
-                    msgEl.className = "status"; msgEl.textContent = "";
+                    msgEl.className = "status";
+                    msgEl.textContent = "";
                     const t = (textEl.value || "").trim();
-                    if (!t) { msgEl.className = "status err"; msgEl.textContent = "댓글을 입력하세요."; return; }
+                    if (!t) {
+                        msgEl.className = "status err";
+                        msgEl.textContent = "댓글을 입력하세요.";
+                        return;
+                    }
                     btnEl.disabled = true;
                     await window.fb.addComment(post.id, { text: t, anonymous: !!anonChk.checked });
-                    textEl.value = ""; anonChk.checked = false;
-                    msgEl.className = "status ok"; msgEl.textContent = "등록 완료!";
+                    textEl.value = "";
+                    anonChk.checked = false;
+                    msgEl.className = "status ok";
+                    msgEl.textContent = "등록 완료!";
                     await reload();
                 } catch (e) {
-                    msgEl.className = "status err"; msgEl.textContent = "등록 실패: " + (e.message || e);
+                    msgEl.className = "status err";
+                    msgEl.textContent = "등록 실패: " + (e.message || e);
                 } finally {
                     btnEl.disabled = false;
                 }
@@ -245,42 +349,100 @@
             const wrap = document.createElement("div");
             wrap.className = "post-card";
             const display = p.authorDisplay || (p.authorEmail ? p.authorEmail.split("@")[0] : "익명");
+            const when = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : "";
 
             wrap.innerHTML = `
                     <h3 class="post-title">${esc(p.title)}</h3>
-                    <div class="post-meta">${esc(display)} · ${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</div>
-                    <div class="post-body">${esc(p.body)}</div>
-                    <div class="row" style="gap:8px; margin-top:8px"></div>
+                    <div class="post-meta">${esc(display)} · ${when}</div>
+                    <div class="post-body">${linkify(esc(p.body))}</div>
+                    <div class="row post-like-row" style="gap:8px; margin-top:8px; align-items:center;">
+                        <button class="link-btn post-like-btn" style="border-color:#ef4444; color:#ef4444;">좋아요</button>
+                        <span class="muted-sm"><b class="post-like-cnt">0</b></span>
+                    </div>
+                    <div class="row post-actions" style="gap:8px; margin-top:6px"></div>
                 `;
-            const row = wrap.querySelector(".row");
-            if (canEditOrDelete(p)) {
-                const editBtn = document.createElement("button");
-                editBtn.className = "link-btn"; editBtn.textContent = "수정";
-                editBtn.style.borderColor = "var(--accent)"; editBtn.style.color = "var(--accent)";
-                editBtn.addEventListener("click", async () => {
-                    const nt = prompt("새 제목을 입력하세요", p.title ?? ""); if (nt == null) return;
-                    const nb = prompt("새 내용을 입력하세요", p.body ?? ""); if (nb == null) return;
-                    try {
-                        await window.fb.updatePost(p.id, { title: nt, body: nb });
-                        p.title = nt; p.body = nb;
-                        wrap.querySelector(".post-title").textContent = nt;
-                        wrap.querySelector(".post-body").textContent = nb;
-                    } catch (e) { alert("수정 실패: " + (e.message || e)); }
-                });
-                row.appendChild(editBtn);
 
-                const delBtn = document.createElement("button");
-                delBtn.textContent = "삭제"; delBtn.className = "link-btn";
-                delBtn.style.borderColor = "#ef4444"; delBtn.style.color = "#ef4444";
-                delBtn.addEventListener("click", async () => {
-                    if (!confirm("정말 삭제할까요?")) return;
-                    try { await window.fb.deletePost(p.id); wrap.remove(); const left = list.querySelectorAll(".post-card").length; countTxt.textContent = left ? `총 ${left}개` : ""; }
-                    catch (e) { alert("삭제 실패: " + (e.message || e)); }
+            // 게시글 좋아요 (개수 + 색상)
+            const likeBtn = wrap.querySelector(".post-like-btn");
+            const likeCntEl = wrap.querySelector(".post-like-cnt");
+
+            if (likeBtn && likeCntEl && window.fb.onLikeCount) {
+                let liked = false;
+                applyLikeVisual(likeBtn, liked);
+
+                // 현재 내가 좋아요 눌렀는지 초기 상태 조회
+                (async () => {
+                    try {
+                        const ref = doc(db, "posts", p.id, "likes", MY_UID);
+                        const snap = await getDoc(ref);
+                        liked = snap.exists();
+                        applyLikeVisual(likeBtn, liked);
+                    } catch { }
+                })();
+
+                const un = window.fb.onLikeCount(p.id, (n) => {
+                    likeCntEl.textContent = String(n);
                 });
-                row.appendChild(delBtn);
+                window.addEventListener("beforeunload", () => { try { un && un(); } catch { } });
+
+                likeBtn.addEventListener("click", async () => {
+                    try {
+                        likeBtn.disabled = true;
+                        await window.fb.togglePostLike(p.id);
+                        liked = !liked;
+                        applyLikeVisual(likeBtn, liked);
+                    } catch (e) {
+                        alert("좋아요 실패: " + (e.message || e));
+                    } finally {
+                        likeBtn.disabled = false;
+                    }
+                });
             }
 
-            /* ✅ 댓글 블록 부착 */
+            const actionsRow = wrap.querySelector(".post-actions");
+            if (canEditOrDelete(p)) {
+                const editBtn = document.createElement("button");
+                editBtn.className = "link-btn";
+                editBtn.textContent = "수정";
+                editBtn.style.borderColor = "var(--accent)";
+                editBtn.style.color = "var(--accent)";
+                editBtn.addEventListener("click", async () => {
+                    const nt = prompt("새 제목을 입력하세요", p.title ?? "");
+                    if (nt == null) return;
+                    const nb = prompt("새 내용을 입력하세요", p.body ?? "");
+                    if (nb == null) return;
+                    try {
+                        await window.fb.updatePost(p.id, { title: nt, body: nb });
+                        p.title = nt;
+                        p.body = nb;
+                        wrap.querySelector(".post-title").textContent = nt;
+                        wrap.querySelector(".post-body").innerHTML = linkify(esc(nb));
+                    } catch (e) {
+                        alert("수정 실패: " + (e.message || e));
+                    }
+                });
+                actionsRow.appendChild(editBtn);
+
+                const delBtn = document.createElement("button");
+                delBtn.textContent = "삭제";
+                delBtn.className = "link-btn";
+                delBtn.style.borderColor = "#ef4444";
+                delBtn.style.color = "#ef4444";
+                delBtn.addEventListener("click", async () => {
+                    if (!confirm("정말 삭제할까요?")) return;
+                    try {
+                        await window.fb.deletePost(p.id);
+                        wrap.remove();
+                        const left = list.querySelectorAll(".post-card").length;
+                        countTxt.textContent = left ? `총 ${left}개` : "";
+                    } catch (e) {
+                        alert("삭제 실패: " + (e.message || e));
+                    }
+                });
+                actionsRow.appendChild(delBtn);
+            }
+
+            // 댓글 블록
             renderCommentsBlock(p, wrap);
 
             list.prepend(wrap);
@@ -288,18 +450,31 @@
 
         postBtn?.addEventListener("click", async () => {
             try {
-                postMsg.className = "status"; postMsg.textContent = "";
-                const title = (titleEl.value || "").trim(); const body = (bodyEl.value || "").trim();
+                postMsg.className = "status";
+                postMsg.textContent = "";
+                const title = (titleEl.value || "").trim();
+                const body = (bodyEl.value || "").trim();
                 const anonymous = !!anonEl.checked;
-                if (!title) { postMsg.className = "status err"; postMsg.textContent = "제목을 입력하세요."; return; }
+                if (!title) {
+                    postMsg.className = "status err";
+                    postMsg.textContent = "제목을 입력하세요.";
+                    return;
+                }
                 postBtn.disabled = true;
                 await window.fb.createPost({ title, body, anonymous });
-                titleEl.value = ""; bodyEl.value = ""; anonEl.checked = false;
-                postMsg.className = "status ok"; postMsg.textContent = "등록 완료!";
-                list.innerHTML = ""; await loadMore();
+                titleEl.value = "";
+                bodyEl.value = "";
+                anonEl.checked = false;
+                postMsg.className = "status ok";
+                postMsg.textContent = "등록 완료!";
+                list.innerHTML = "";
+                await loadMore();
             } catch (e) {
-                postMsg.className = "status err"; postMsg.textContent = "등록 실패: " + (e.message || e);
-            } finally { postBtn.disabled = false; }
+                postMsg.className = "status err";
+                postMsg.textContent = "등록 실패: " + (e.message || e);
+            } finally {
+                postBtn.disabled = false;
+            }
         });
 
         async function loadMore() {
