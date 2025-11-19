@@ -170,7 +170,23 @@
             } finally { quickBtn.disabled = false; }
         });
 
-        function esc(s) { return (s || "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[m])); }
+        function esc(s) {
+            return (s || "").replace(/[&<>"']/g, m => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                "\"": "&quot;",
+                "'": "&#39;"
+            }[m]));
+        }
+
+        // 🔗 URL을 자동으로 하이퍼링크로 바꿔주는 함수 (이미 esc된 문자열 대상)
+        function linkify(html) {
+            return (html || "").replace(
+                /(https?:\/\/[^\s<]+)/g,
+                '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+            );
+        }
 
         async function loadFeed() {
             const items = await window.fb.listPosts({ take: 5 }) || [];
@@ -179,15 +195,25 @@
                 const display = p.authorDisplay || (p.authorEmail ? p.authorEmail.split("@")[0] : "익명");
                 const card = document.createElement("div");
                 card.className = "post-card";
+
+                const bodyFull = p.body || "";
+                const previewHtml = linkify(esc(bodyFull.slice(0, 100))) + (bodyFull.length > 100 ? "…" : "");
+
                 card.innerHTML = `
-                        <div class="post-title">${esc(p.title)}</div>
-                        <div class="post-meta">
-                          <span>${esc(display)}</span><span>·</span>
-                          <span>${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</span>
-                          <span>·</span><span>좋아요 <b class="likecnt">0</b></span>
-                        </div>
-                        <div class="muted-sm" style="margin-top:6px">${esc((p.body || "").slice(0, 100))}${(p.body || "").length > 100 ? "…" : ""}</div>
-                        <div class="nav" style="margin-top:10px"><a class="link-btn" href="community.html">댓글/상세 보기</a></div>`;
+                            <div class="post-title">${esc(p.title)}</div>
+                            <div class="post-meta">
+                              <span>${esc(display)}</span><span>·</span>
+                              <span>${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</span>
+                              <span>·</span><span>좋아요 <b class="likecnt">0</b></span>
+                            </div>
+                            <div class="muted-sm post-preview" style="margin-top:6px"></div>
+                            <div class="nav" style="margin-top:10px"><a class="link-btn" href="community.html">댓글/상세 보기</a></div>
+                        `;
+
+                // 미리보기 영역에 링크 포함된 HTML 주입
+                const previewEl = card.querySelector(".post-preview");
+                if (previewEl) previewEl.innerHTML = previewHtml;
+
                 const canManage = IS_ADMIN || ((p.authorEmail || "").toLowerCase() === MY_EMAIL);
                 if (canManage) {
                     const nav = card.querySelector(".nav");
@@ -201,7 +227,11 @@
                             await window.fb.updatePost(p.id, { title: nt, body: nb });
                             p.title = nt; p.body = nb;
                             card.querySelector(".post-title").textContent = nt;
-                            card.querySelector(".muted-sm").textContent = (nb || "").slice(0, 100) + ((nb || "").length > 100 ? "…" : "");
+
+                            const full = nb || "";
+                            const html = linkify(esc(full.slice(0, 100))) + (full.length > 100 ? "…" : "");
+                            const prev = card.querySelector(".post-preview");
+                            if (prev) prev.innerHTML = html;
                         } catch (e) { alert("수정 실패: " + (e.message || e)); }
                     });
                     nav.appendChild(editBtn);
@@ -225,7 +255,9 @@
 
             if (feed.children.length === 0) {
                 const div = document.createElement("div");
-                div.className = "muted-sm"; div.style.marginTop = "6px"; div.textContent = "아직 글이 없어요. 첫 글을 남겨보세요!";
+                div.className = "muted-sm";
+                div.style.marginTop = "6px";
+                div.textContent = "아직 글이 없어요. 첫 글을 남겨보세요!";
                 feed.appendChild(div);
             }
         }
@@ -243,7 +275,9 @@
             if (data?.mbti) L.push(`MBTI: ${String(data.mbti).toUpperCase()}`);
             if (data?.content) L.push(`콘텐츠: ${data.content}`);
             profileBox.textContent = L.length ? L.join(" · ") : "아직 프로필 정보가 비어 있어요.";
-        } catch { profileBox.textContent = "프로필을 불러오지 못했어요."; }
+        } catch {
+            profileBox.textContent = "프로필을 불러오지 못했어요.";
+        }
     </script>
 </body>
 </html>
