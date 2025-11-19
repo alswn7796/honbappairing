@@ -1,4 +1,4 @@
-// firebase.js v34 — 댓글 + 매칭 + 나가기 알림 + 패널티/이용제한(거절자만) + 좋아요(게시글/댓글)
+// firebase.js v34 — 댓글 + 매칭 + 나가기 알림 + 패널티/이용제한(거절자만) + 좋아요(게시글/댓글) + 매칭 스코어
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
     getAuth, onAuthStateChanged, signInAnonymously, signOut,
@@ -68,6 +68,7 @@ const my = {
             penaltyScore: p.penaltyScore ?? 0,       // 누적 패널티
             penaltyUntil: p.penaltyUntil ?? null,    // 이용 제한 종료 시각(Date 혹은 Timestamp)
             honbapTemp: p.honbapTemp ?? 50,
+            // matchCount/matchStars 는 별도 함수(addMatchSuccess)에서만 관리
             updatedAt: serverTimestamp(),
         };
         await setDoc(doc(db, "profiles", my.uid), payload, { merge: true });
@@ -273,6 +274,36 @@ async function applyPenalty() {
     });
 }
 
+// --- 매칭 스코어(성공 횟수/별) -------------------------------------------------
+async function addMatchSuccess() {
+    await my.requireAuth();
+    const ref = doc(db, "profiles", my.uid);
+    let result = { matchCount: 0, matchStars: 0, rewarded: false };
+
+    await runTransaction(db, async tx => {
+        const s = await tx.get(ref);
+        const p = s.exists() ? s.data() : {};
+        const curCount = Number(p.matchCount || 0);
+        const curStarsRaw = Number(p.matchStars || 0);
+        const curStars = Number.isFinite(curStarsRaw) && curStarsRaw > 0 ? curStarsRaw : 0;
+
+        const nextCount = curCount + 1;
+        const maxStars = 3;
+        const nextStars = Math.min(maxStars, Math.floor(nextCount / 3));
+        const rewarded = (nextStars >= maxStars && curStars < maxStars);
+
+        tx.set(ref, {
+            matchCount: nextCount,
+            matchStars: nextStars,
+            updatedAt: serverTimestamp()
+        }, { merge: true });
+
+        result = { matchCount: nextCount, matchStars: nextStars, rewarded };
+    });
+
+    return result;
+}
+
 // --- 매칭/채팅 ---------------------------------------------------------------
 const MATCH_TIMEOUT_MS = 45000;
 const ONLINE_WINDOW_MS = 90000;
@@ -345,19 +376,13 @@ async function findOpponent(myDocId) {
     }
     return null;
 }
-
-// ✅ 방 생성 시 기본 상태: pendingAccept + 수락 투표 정보는 비어 있음
 async function createRoomAndInvite(myDocId, oppDocId, oppUid) {
-    const members = Array.from(new Set([my.uid, oppUid])).filter(Boolean);
     const roomRef = doc(collection(db, "rooms"));
     await setDoc(roomRef, {
-        members,
+        members: Array.from(new Set([my.uid, oppUid])).filter(Boolean),
         createdAt: serverTimestamp(),
         phase: "pendingAccept",
         invites: { to: oppDocId, at: serverTimestamp(), accepted: null },
-        acceptVoted: [],
-        acceptYes: [],
-        declinedBy: null,
     });
     await updateDoc(doc(db, "matchQueue", myDocId), {
         status: "matched", roomId: roomRef.id, lastActive: serverTimestamp()
@@ -369,58 +394,19 @@ async function createRoomAndInvite(myDocId, oppDocId, oppUid) {
 }
 
 // --- 수락 단계 ---------------------------------------------------------------
-// ✅ 양쪽 모두 수락해야만 phase가 'startCheck'로 이동
 async function myAcceptOrDecline(roomId, accept) {
     const ref = doc(db, "rooms", roomId);
     await runTransaction(db, async tx => {
         const s = await tx.get(ref); if (!s.exists()) throw new Error("room not found");
-        const r = s.data();
-
-        // 이미 다른 결과가 난 방이면 더 이상 처리하지 않음
-        if (r.phase !== 'pendingAccept') return;
-
-        const members = new Set(r.members || []);
-        members.add(my.uid);
-
-        const voted = new Set(r.acceptVoted || []);
-        const yesSet = new Set(r.acceptYes || []);
-
-        voted.add(my.uid);
-        if (accept) yesSet.add(my.uid);
-
-        let phase = r.phase;
-        let declinedBy = r.declinedBy || null;
-
-        if (!accept) {
-            // 내가 거절한 경우: 즉시 declined
-            phase = 'declined';
-            declinedBy = my.uid;
-        } else {
-            // 수락한 경우: 모든 멤버가 수락했는지 체크
-            const everyoneVoted = Array.from(members).every(u => voted.has(u));
-            const everyoneYes = everyoneVoted && Array.from(members).every(u => yesSet.has(u));
-            if (everyoneYes) {
-                phase = 'startCheck';
-                declinedBy = null;
-            } else {
-                // 아직 상대 응답 안 온 상태 → pendingAccept 유지
-                phase = 'pendingAccept';
-            }
-        }
-
-        const patch = {
-            members: Array.from(members),
-            acceptVoted: Array.from(voted),
-            acceptYes: Array.from(yesSet),
+        const r = s.data(); if (r.phase !== 'pendingAccept') return;
+        tx.update(ref, {
+            members: Array.from(new Set([...(r.members || []), my.uid])),
+            phase: accept ? 'startCheck' : 'declined',
+            declinedBy: accept ? null : my.uid,
             updatedAt: serverTimestamp(),
-        };
-        if (phase !== r.phase) patch.phase = phase;
-        if (declinedBy !== null) patch.declinedBy = declinedBy;
-
-        tx.update(ref, patch);
+        });
     });
 }
-
 async function waitInviteDecision(roomId, timeoutSec = 30) {
     const ref = doc(db, "rooms", roomId);
     return new Promise(resolve => {
@@ -464,7 +450,7 @@ async function myStartYesOrNo(roomId, yes) {
             phase: everyoneVoted ? (everyoneYes ? 'chatting' : 'startDeclined') : 'startCheck',
             updatedAt: serverTimestamp(),
         };
-        if (everyoneVoted && !everyoneYes && !r.startDeclinedBy) patch.startDeclinedBy = myUid;
+        if (everyoneVoted && !everyoneYes && !r.startDeclinedBy) patch.startDeclinedBy = my.uid;
         tx.update(ref, patch);
     });
 }
@@ -616,6 +602,7 @@ const api = {
     },
 
     isAdminEmail,
+    addMatchSuccess,   // ← 매칭 스코어 공개 API
 };
 
 window.fb = api;
