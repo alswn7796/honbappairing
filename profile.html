@@ -22,6 +22,13 @@
             <!-- ⬇️ 패널티 현황 -->
             <p class="muted">패널티: <b id="penaltyInfo">0 / 5</b></p>
 
+            <!-- ✅ 패널티 초기화 버튼 (기본은 숨김, 관리자일 때만 JS로 보여줌) -->
+            <button id="resetPenaltyBtn"
+                    class="btn outline"
+                    style="margin-top:8px; width:auto; display:none;">
+                패널티 초기화
+            </button>
+
             <!-- 입력 순서 동일 -->
             <label class="label">닉네임</label>
             <input id="nickname" class="input" type="text" placeholder="예: 서준" />
@@ -55,8 +62,10 @@
             <p id="status" class="status muted" style="margin-top:8px;"></p>
         </div>
 
+        <!-- ✅ 아래 네비게이션: 커뮤니티 / 매칭 / 홈 -->
         <div class="row between" style="margin-top:16px; transform: translateY(-0.7cm);">
             <a class="btn outline" href="community.html" style="width:auto !important; display:inline-flex !important; padding:6px 12px; font-size:14px;">커뮤니티</a>
+            <a class="btn outline" href="match.html" style="width:auto !important; display:inline-flex !important; padding:6px 12px; font-size:14px;">매칭</a>
             <a class="btn outline" href="index.html" style="width:auto !important; display:inline-flex !important; padding:6px 12px; font-size:14px;">홈</a>
         </div>
     </div>
@@ -78,8 +87,13 @@
         const loginEmail = $('loginEmail');
         const statusEl = $('status');
         const penaltyInfo = $('penaltyInfo');
+        const resetPenaltyBtn = $('resetPenaltyBtn');
 
         const fbReady = window.fbReady || Promise.resolve(window.fb);
+
+        // 현재 불러온 프로필 데이터를 기억해두었다가 초기화 시 같이 넘겨줄 용도
+        let currentProfile = null;
+        let isAdmin = false;
 
         function setStatus(msg, ok = true) {
             statusEl.textContent = msg || '';
@@ -101,16 +115,27 @@
         async function boot() {
             const fb = await fbReady;
 
+            // 로그인 이메일 + 관리자 여부 판단
             try {
                 const u = await fb.requireAuth();
                 const savedEmail = sessionStorage.getItem('lastEmail');
-                loginEmail.textContent = u?.email || savedEmail || '(익명)';
+                const email = u?.email || savedEmail || '(익명)';
+                loginEmail.textContent = email;
+
+                // ✅ 관리자 판별
+                isAdmin = fb.isAdminEmail?.(email) === true;
+                if (isAdmin && resetPenaltyBtn) {
+                    resetPenaltyBtn.style.display = 'inline-flex';
+                }
             } catch {
                 loginEmail.textContent = '(익명)';
             }
 
+            // 프로필 불러오기
             try {
-                const data = await (await fbReady).loadProfile().catch(() => null);
+                const data = await fb.loadProfile().catch(() => null);
+                currentProfile = data;
+
                 if (data) {
                     if (data.nickname) nickname.value = data.nickname;
                     if (data.year != null) year.value = data.year;
@@ -129,6 +154,33 @@
                 setStatus("프로필을 불러오지 못했어요.", false);
             }
 
+            // ✅ 패널티 초기화 버튼 동작
+            resetPenaltyBtn?.addEventListener('click', async () => {
+                if (!isAdmin) {
+                    setStatus('패널티 초기화 권한이 없습니다.', false);
+                    return;
+                }
+                try {
+                    setStatus('');
+                    const base = currentProfile || {};
+                    await fb.saveProfile({
+                        ...base,
+                        penaltyScore: 0,
+                        penaltyUntil: null
+                    });
+                    penaltyInfo.textContent = '0 / 5';
+                    setStatus('패널티가 초기화되었습니다.', true);
+                    currentProfile = {
+                        ...base,
+                        penaltyScore: 0,
+                        penaltyUntil: null
+                    };
+                } catch (e) {
+                    setStatus('패널티 초기화 실패: ' + (e.message || e), false);
+                }
+            });
+
+            // 프로필 저장 버튼 동작
             $('saveBtn').addEventListener('click', async () => {
                 setStatus('');
                 const payload = {
@@ -142,15 +194,19 @@
                     freeText: freeText.value || ''
                 };
                 try {
-                    await (await fbReady).saveProfile(payload);
+                    await fb.saveProfile(payload);
                     setStatus('프로필 저장 완료!', true);
+                    currentProfile = {
+                        ...(currentProfile || {}),
+                        ...payload
+                    };
                 } catch (e) {
                     setStatus('저장 실패: ' + (e.message || e), false);
                 }
             });
 
             $('logoutFab').addEventListener('click', async () => {
-                try { await (await fbReady).logout(); } catch { }
+                try { await fb.logout(); } catch { }
                 location.href = 'login.html';
             });
         }
