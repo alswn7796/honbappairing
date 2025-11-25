@@ -1,11 +1,10 @@
-// firebase.js
 // firebase.js v35 — 댓글 + 매칭 + 나가기 알림 + 패널티/이용제한(거절자만) + 좋아요(게시글/댓글) + 매칭 스코어
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
     getAuth, onAuthStateChanged, signInAnonymously, signOut,
     signInWithEmailAndPassword, createUserWithEmailAndPassword,
     sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updatePassword,
-    fetchSignInMethodsForEmail            // ✅ 추가: 이메일 중복 여부 확인용
+    fetchSignInMethodsForEmail          // ✅ 이메일 중복 확인용 추가
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
 import {
     getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
@@ -120,8 +119,24 @@ async function loginWithEmailPassword(email, pw) {
     const cred = await signInWithEmailAndPassword(auth, email, pw);
     return cred.user;
 }
+
+// ✅ 여기서도 이메일 중복 막기
 async function signUpWithEmailPassword(email, pw) {
-    const cred = await createUserWithEmailAndPassword(auth, email, pw);
+    const e = (email || "").trim();
+
+    // 광운대 메일 형식인지 확인
+    const KW_EMAIL_RE = /@kw\.ac\.kr$/i;
+    if (!e || !KW_EMAIL_RE.test(e)) {
+        throw new Error("광운대 이메일(@kw.ac.kr)만 사용 가능합니다.");
+    }
+
+    // 이미 가입된 메일인지 체크
+    const methods = await fetchSignInMethodsForEmail(auth, e);
+    if (methods && methods.length > 0) {
+        throw new Error("이미 가입된 메일입니다.");
+    }
+
+    const cred = await createUserWithEmailAndPassword(auth, e, pw);
     return cred.user;
 }
 
@@ -137,7 +152,7 @@ const _actionCodeSettings = () => ({
     handleCodeInApp: true
 });
 
-// ✅ 여기에서 이메일 중복 여부를 체크해서 이미 가입된 메일이면 바로 막는다.
+// ✅ 인증 메일 보내기 전에 이메일 중복 체크
 async function sendEmailLink(email) {
     const e = (email || "").trim();
     _assertKwEmail(e);
@@ -145,7 +160,6 @@ async function sendEmailLink(email) {
     // 이미 가입된 이메일인지 확인
     const methods = await fetchSignInMethodsForEmail(auth, e);
     if (methods && methods.length > 0) {
-        // signup.html 에서 catch 해서 이 메시지를 그대로 보여줄 수 있음
         throw new Error("이미 가입된 메일입니다.");
     }
 
