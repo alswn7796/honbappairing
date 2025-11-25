@@ -3,8 +3,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/fireba
 import {
     getAuth, onAuthStateChanged, signInAnonymously, signOut,
     signInWithEmailAndPassword, createUserWithEmailAndPassword,
-    sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updatePassword,
-    fetchSignInMethodsForEmail          // ✅ 이메일 중복 확인용 추가
+    sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updatePassword
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
 import {
     getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
@@ -85,8 +84,32 @@ const my = {
         return snap.exists() ? snap.data() : null;
     },
 
+    // ★★★ 닉네임 중복 방지 적용된 saveProfile ★★★
     async saveProfile(p) {
         await my.requireAuth();
+
+        const ref = doc(db, "profiles", my.uid);
+        const snap = await getDoc(ref);
+        const prev = snap.exists() ? snap.data() : null;
+
+        // 새 닉네임 정규화
+        const rawNick = (p.nickname ?? p.nick ?? "").trim();
+        const nickname = rawNick || null;
+        const nicknameLower = nickname ? nickname.toLowerCase() : null;
+
+        // 닉네임을 입력한 경우에만 중복 검사
+        if (nicknameLower) {
+            const qy = query(
+                collection(db, "profiles"),
+                where("nicknameLower", "==", nicknameLower),
+                limit(1)
+            );
+            const ss = await getDocs(qy);
+            const conflict = ss.docs.find(d => d.id !== my.uid);
+            if (conflict) {
+                throw new Error("이미 사용 중인 닉네임입니다.");
+            }
+        }
 
         const payload = {
             year: p.year ?? null,
@@ -94,23 +117,24 @@ const my = {
             gender: p.gender ?? null,
             major: p.major ?? null,
             mbti: p.mbti ?? null,
-            nickname: (p.nickname ?? p.nick ?? "").trim() || null,
+            nickname,
+            nicknameLower: nicknameLower ?? null,
             content: (p.content ?? p.consume ?? "").trim() || null,
             freeText: (p.freeText ?? "").trim(),
             isBot: !!p.isBot,
 
             // 패널티/이용 제한
-            penaltyScore: p.penaltyScore ?? 0,
-            penaltyUntil: p.penaltyUntil ?? null,
+            penaltyScore: p.penaltyScore ?? (prev?.penaltyScore ?? 0),
+            penaltyUntil: p.penaltyUntil ?? (prev?.penaltyUntil ?? null),
 
             // 매칭 온도 (있던 값 유지)
-            honbapTemp: p.honbapTemp ?? 50,
+            honbapTemp: p.honbapTemp ?? (prev?.honbapTemp ?? 50),
 
             // matchCount / matchStars 는 addMatchSuccess 에서만 조정
             updatedAt: serverTimestamp(),
         };
 
-        await setDoc(doc(db, "profiles", my.uid), payload, { merge: true });
+        await setDoc(ref, payload, { merge: true });
     }
 };
 
@@ -119,24 +143,8 @@ async function loginWithEmailPassword(email, pw) {
     const cred = await signInWithEmailAndPassword(auth, email, pw);
     return cred.user;
 }
-
-// ✅ 여기서도 이메일 중복 막기
 async function signUpWithEmailPassword(email, pw) {
-    const e = (email || "").trim();
-
-    // 광운대 메일 형식인지 확인
-    const KW_EMAIL_RE = /@kw\.ac\.kr$/i;
-    if (!e || !KW_EMAIL_RE.test(e)) {
-        throw new Error("광운대 이메일(@kw.ac.kr)만 사용 가능합니다.");
-    }
-
-    // 이미 가입된 메일인지 체크
-    const methods = await fetchSignInMethodsForEmail(auth, e);
-    if (methods && methods.length > 0) {
-        throw new Error("이미 가입된 메일입니다.");
-    }
-
-    const cred = await createUserWithEmailAndPassword(auth, e, pw);
+    const cred = await createUserWithEmailAndPassword(auth, email, pw);
     return cred.user;
 }
 
@@ -152,17 +160,9 @@ const _actionCodeSettings = () => ({
     handleCodeInApp: true
 });
 
-// ✅ 인증 메일 보내기 전에 이메일 중복 체크
 async function sendEmailLink(email) {
     const e = (email || "").trim();
     _assertKwEmail(e);
-
-    // 이미 가입된 이메일인지 확인
-    const methods = await fetchSignInMethodsForEmail(auth, e);
-    if (methods && methods.length > 0) {
-        throw new Error("이미 가입된 메일입니다.");
-    }
-
     await sendSignInLinkToEmail(auth, e, _actionCodeSettings());
     try { localStorage.setItem("signup_email", e); } catch { }
     return true;
