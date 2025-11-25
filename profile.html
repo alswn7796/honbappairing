@@ -23,7 +23,13 @@
             <p class="muted">매칭 스코어: <span id="matchScore">☆☆☆ (0회)</span></p>
             <p class="muted">패널티: <b id="penaltyInfo">0 / 5</b></p>
 
-            <!-- ✅ 패널티 초기화 버튼 (기본은 숨김, 관리자일 때만 JS로 보여줌) -->
+            <!-- ✅ 매칭 스코어 / 패널티 초기화 버튼 (관리자 전용, 기본 숨김) -->
+            <button id="resetMatchScoreBtn"
+                    class="btn outline"
+                    style="margin-top:8px; width:auto; display:none;">
+                매칭 스코어 초기화
+            </button>
+
             <button id="resetPenaltyBtn"
                     class="btn outline"
                     style="margin-top:8px; width:auto; display:none;">
@@ -90,6 +96,7 @@
         const penaltyInfo = $('penaltyInfo');
         const resetPenaltyBtn = $('resetPenaltyBtn');
         const matchScore = $('matchScore');
+        const resetMatchScoreBtn = $('resetMatchScoreBtn');
 
         const fbReady = window.fbReady || Promise.resolve(window.fb);
 
@@ -135,8 +142,9 @@
                 loginEmail.textContent = email;
 
                 isAdmin = fb.isAdminEmail?.(email) === true;
-                if (isAdmin && resetPenaltyBtn) {
-                    resetPenaltyBtn.style.display = 'inline-flex';
+                if (isAdmin) {
+                    if (resetPenaltyBtn) resetPenaltyBtn.style.display = 'inline-flex';
+                    if (resetMatchScoreBtn) resetMatchScoreBtn.style.display = 'inline-flex';
                 }
             } catch {
                 loginEmail.textContent = '(익명)';
@@ -177,6 +185,35 @@
                     matchScore.textContent = `${renderStars(0)} (0회)`;
                 }
             }
+
+            // ✅ 매칭 스코어 초기화 버튼 동작 (관리자 전용)
+            resetMatchScoreBtn?.addEventListener('click', async () => {
+                if (!isAdmin) {
+                    setStatus('매칭 스코어 초기화 권한이 없습니다.', false);
+                    return;
+                }
+                try {
+                    setStatus('');
+                    const res = await fb.resetMatchScore();
+                    const mc = res?.matchCount ?? 0;
+                    const ms = 0; // 초기화 후는 별 0개
+
+                    if (matchScore) {
+                        const starsText = renderStars(ms);
+                        matchScore.textContent = `${starsText} (${mc}회)`;
+                    }
+
+                    currentProfile = {
+                        ...(currentProfile || {}),
+                        matchCount: mc,
+                        matchStars: ms
+                    };
+
+                    setStatus('매칭 스코어가 초기화되었습니다.', true);
+                } catch (e) {
+                    setStatus('매칭 스코어 초기화 실패: ' + (e.message || e), false);
+                }
+            });
 
             // ✅ 패널티 초기화 버튼 동작
             resetPenaltyBtn?.addEventListener('click', async () => {
