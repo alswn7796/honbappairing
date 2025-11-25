@@ -3,7 +3,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/fireba
 import {
     getAuth, onAuthStateChanged, signInAnonymously, signOut,
     signInWithEmailAndPassword, createUserWithEmailAndPassword,
-    sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updatePassword
+    sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updatePassword,
+    fetchSignInMethodsForEmail
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
 import {
     getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
@@ -43,14 +44,19 @@ const my = {
         return auth?.currentUser?.uid || null;
     },
 
+    // 🔐 이메일 로그인된 사용자만 통과 (익명 로그인 제거)
     async requireAuth() {
-        if (auth.currentUser) return auth.currentUser;
+        // 이미 이메일 계정으로 로그인돼 있으면 바로 반환
+        if (auth.currentUser && auth.currentUser.email) return auth.currentUser;
 
-        // 1. 잠깐 기다려서 이미 로그인된 유저가 있는지 확인
-        const waited = await new Promise(res => {
+        // 잠깐 기다리면서 기존 세션이 붙는지 확인
+        const user = await new Promise(res => {
             let done = false;
             const t = setTimeout(() => {
-                if (!done) { done = true; res(null); }
+                if (!done) {
+                    done = true;
+                    res(null);
+                }
             }, 1500);
 
             const un = onAuthStateChanged(auth, u => {
@@ -63,15 +69,10 @@ const my = {
             });
         });
 
-        if (waited) return waited;
+        if (user && user.email) return user;
 
-        // 2. 없으면 익명 로그인
-        await signInAnonymously(auth);
-        return new Promise(res => {
-            const un = onAuthStateChanged(auth, u => {
-                if (u) { un(); res(u); }
-            });
-        });
+        // 여기까지 왔으면 "로그인 안 했거나, 이메일 없는 계정(익명 등)" → 로그인 필요
+        throw new Error("로그인이 필요합니다.");
     },
 
     async logout() {
@@ -84,32 +85,8 @@ const my = {
         return snap.exists() ? snap.data() : null;
     },
 
-    // ★★★ 닉네임 중복 방지 적용된 saveProfile ★★★
     async saveProfile(p) {
         await my.requireAuth();
-
-        const ref = doc(db, "profiles", my.uid);
-        const snap = await getDoc(ref);
-        const prev = snap.exists() ? snap.data() : null;
-
-        // 새 닉네임 정규화
-        const rawNick = (p.nickname ?? p.nick ?? "").trim();
-        const nickname = rawNick || null;
-        const nicknameLower = nickname ? nickname.toLowerCase() : null;
-
-        // 닉네임을 입력한 경우에만 중복 검사
-        if (nicknameLower) {
-            const qy = query(
-                collection(db, "profiles"),
-                where("nicknameLower", "==", nicknameLower),
-                limit(1)
-            );
-            const ss = await getDocs(qy);
-            const conflict = ss.docs.find(d => d.id !== my.uid);
-            if (conflict) {
-                throw new Error("이미 사용 중인 닉네임입니다.");
-            }
-        }
 
         const payload = {
             year: p.year ?? null,
@@ -117,24 +94,23 @@ const my = {
             gender: p.gender ?? null,
             major: p.major ?? null,
             mbti: p.mbti ?? null,
-            nickname,
-            nicknameLower: nicknameLower ?? null,
+            nickname: (p.nickname ?? p.nick ?? "").trim() || null,
             content: (p.content ?? p.consume ?? "").trim() || null,
             freeText: (p.freeText ?? "").trim(),
             isBot: !!p.isBot,
 
             // 패널티/이용 제한
-            penaltyScore: p.penaltyScore ?? (prev?.penaltyScore ?? 0),
-            penaltyUntil: p.penaltyUntil ?? (prev?.penaltyUntil ?? null),
+            penaltyScore: p.penaltyScore ?? 0,
+            penaltyUntil: p.penaltyUntil ?? null,
 
             // 매칭 온도 (있던 값 유지)
-            honbapTemp: p.honbapTemp ?? (prev?.honbapTemp ?? 50),
+            honbapTemp: p.honbapTemp ?? 50,
 
             // matchCount / matchStars 는 addMatchSuccess 에서만 조정
             updatedAt: serverTimestamp(),
         };
 
-        await setDoc(ref, payload, { merge: true });
+        await setDoc(doc(db, "profiles", my.uid), payload, { merge: true });
     }
 };
 
@@ -143,6 +119,7 @@ async function loginWithEmailPassword(email, pw) {
     const cred = await signInWithEmailAndPassword(auth, email, pw);
     return cred.user;
 }
+
 async function signUpWithEmailPassword(email, pw) {
     const cred = await createUserWithEmailAndPassword(auth, email, pw);
     return cred.user;
@@ -163,6 +140,12 @@ const _actionCodeSettings = () => ({
 async function sendEmailLink(email) {
     const e = (email || "").trim();
     _assertKwEmail(e);
+    // 🔁 여기선 여전히 fetchSignInMethodsForEmail 사용 중 (이메일 중복 체크 2번 문제용 로직, 지금은 그냥 유지)
+    const methods = await fetchSignInMethodsForEmail(auth, e);
+    if (methods && methods.length > 0) {
+        throw new Error("이미 가입된 메일입니다.");
+    }
+
     await sendSignInLinkToEmail(auth, e, _actionCodeSettings());
     try { localStorage.setItem("signup_email", e); } catch { }
     return true;
@@ -297,7 +280,7 @@ async function listComments(postId, { take = 50 } = {}) {
             limit(take)
         );
         const ss = await getDocs(qy);
-        return ss.docs.map(d => ({ id: d.id, ...d.data() }));
+        return ss.docs.map(d => ({ id: d.id, ...d.data() })); 
     } catch {
         return [];
     }
