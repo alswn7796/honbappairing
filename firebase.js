@@ -1,4 +1,4 @@
-// firebase.js v36 — 댓글 + 매칭 + 나가기 알림 + 패널티/이용제한(거절자만) + 좋아요(게시글/댓글) + 매칭 스코어 + 매칭 스코어 초기화
+// firebase.js v35 — 댓글 + 매칭 + 나가기 알림 + 패널티/이용제한(거절자만) + 좋아요(게시글/댓글) + 매칭 스코어
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
     getAuth, onAuthStateChanged, signInAnonymously, signOut,
@@ -84,8 +84,32 @@ const my = {
         return snap.exists() ? snap.data() : null;
     },
 
+    // ★★★ 닉네임 중복 방지 적용된 saveProfile ★★★
     async saveProfile(p) {
         await my.requireAuth();
+
+        const ref = doc(db, "profiles", my.uid);
+        const snap = await getDoc(ref);
+        const prev = snap.exists() ? snap.data() : null;
+
+        // 새 닉네임 정규화
+        const rawNick = (p.nickname ?? p.nick ?? "").trim();
+        const nickname = rawNick || null;
+        const nicknameLower = nickname ? nickname.toLowerCase() : null;
+
+        // 닉네임을 입력한 경우에만 중복 검사
+        if (nicknameLower) {
+            const qy = query(
+                collection(db, "profiles"),
+                where("nicknameLower", "==", nicknameLower),
+                limit(1)
+            );
+            const ss = await getDocs(qy);
+            const conflict = ss.docs.find(d => d.id !== my.uid);
+            if (conflict) {
+                throw new Error("이미 사용 중인 닉네임입니다.");
+            }
+        }
 
         const payload = {
             year: p.year ?? null,
@@ -93,23 +117,24 @@ const my = {
             gender: p.gender ?? null,
             major: p.major ?? null,
             mbti: p.mbti ?? null,
-            nickname: (p.nickname ?? p.nick ?? "").trim() || null,
+            nickname,
+            nicknameLower: nicknameLower ?? null,
             content: (p.content ?? p.consume ?? "").trim() || null,
             freeText: (p.freeText ?? "").trim(),
             isBot: !!p.isBot,
 
             // 패널티/이용 제한
-            penaltyScore: p.penaltyScore ?? 0,
-            penaltyUntil: p.penaltyUntil ?? null,
+            penaltyScore: p.penaltyScore ?? (prev?.penaltyScore ?? 0),
+            penaltyUntil: p.penaltyUntil ?? (prev?.penaltyUntil ?? null),
 
             // 매칭 온도 (있던 값 유지)
-            honbapTemp: p.honbapTemp ?? 50,
+            honbapTemp: p.honbapTemp ?? (prev?.honbapTemp ?? 50),
 
-            // matchCount / matchStars 는 addMatchSuccess / resetMatchScore 에서만 조정
+            // matchCount / matchStars 는 addMatchSuccess 에서만 조정
             updatedAt: serverTimestamp(),
         };
 
-        await setDoc(doc(db, "profiles", my.uid), payload, { merge: true });
+        await setDoc(ref, payload, { merge: true });
     }
 };
 
@@ -422,17 +447,6 @@ async function addMatchSuccess() {
     });
 
     return result;
-}
-
-// 매칭 스코어 초기화 (관리자용)
-async function resetMatchScore() {
-    await my.requireAuth();
-    const ref = doc(db, "profiles", my.uid);
-    await setDoc(ref, {
-        matchCount: 0,
-        matchStars: 0,
-        updatedAt: serverTimestamp()
-    }, { merge: true });
 }
 
 // ────────────────────── 매칭 / 방 생성 ──────────────────────
@@ -919,7 +933,6 @@ const api = {
 
     isAdminEmail,
     addMatchSuccess,
-    resetMatchScore,
 };
 
 window.fb = api;
