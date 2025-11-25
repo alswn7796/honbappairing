@@ -200,15 +200,15 @@
                 const previewHtml = linkify(esc(bodyFull.slice(0, 100))) + (bodyFull.length > 100 ? "…" : "");
 
                 card.innerHTML = `
-                            <div class="post-title">${esc(p.title)}</div>
-                            <div class="post-meta">
-                              <span>${esc(display)}</span><span>·</span>
-                              <span>${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</span>
-                              <span>·</span><span>좋아요 <b class="likecnt">0</b></span>
-                            </div>
-                            <div class="muted-sm post-preview" style="margin-top:6px"></div>
-                            <div class="nav" style="margin-top:10px"><a class="link-btn" href="community.html">댓글/상세 보기</a></div>
-                        `;
+                                <div class="post-title">${esc(p.title)}</div>
+                                <div class="post-meta">
+                                  <span>${esc(display)}</span><span>·</span>
+                                  <span>${p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : ""}</span>
+                                  <span>·</span><span>좋아요 <b class="likecnt">0</b></span>
+                                </div>
+                                <div class="muted-sm post-preview" style="margin-top:6px"></div>
+                                <div class="nav" style="margin-top:10px"><a class="link-btn" href="community.html">댓글/상세 보기</a></div>
+                            `;
 
                 // 미리보기 영역에 링크 포함된 HTML 주입
                 const previewEl = card.querySelector(".post-preview");
