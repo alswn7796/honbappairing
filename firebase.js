@@ -1,9 +1,11 @@
+// firebase.js
 // firebase.js v35 — 댓글 + 매칭 + 나가기 알림 + 패널티/이용제한(거절자만) + 좋아요(게시글/댓글) + 매칭 스코어
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
     getAuth, onAuthStateChanged, signInAnonymously, signOut,
     signInWithEmailAndPassword, createUserWithEmailAndPassword,
-    sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updatePassword
+    sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updatePassword,
+    fetchSignInMethodsForEmail            // ✅ 추가: 이메일 중복 여부 확인용
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
 import {
     getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
@@ -84,32 +86,8 @@ const my = {
         return snap.exists() ? snap.data() : null;
     },
 
-    // ★★★ 닉네임 중복 방지 적용된 saveProfile ★★★
     async saveProfile(p) {
         await my.requireAuth();
-
-        const ref = doc(db, "profiles", my.uid);
-        const snap = await getDoc(ref);
-        const prev = snap.exists() ? snap.data() : null;
-
-        // 새 닉네임 정규화
-        const rawNick = (p.nickname ?? p.nick ?? "").trim();
-        const nickname = rawNick || null;
-        const nicknameLower = nickname ? nickname.toLowerCase() : null;
-
-        // 닉네임을 입력한 경우에만 중복 검사
-        if (nicknameLower) {
-            const qy = query(
-                collection(db, "profiles"),
-                where("nicknameLower", "==", nicknameLower),
-                limit(1)
-            );
-            const ss = await getDocs(qy);
-            const conflict = ss.docs.find(d => d.id !== my.uid);
-            if (conflict) {
-                throw new Error("이미 사용 중인 닉네임입니다.");
-            }
-        }
 
         const payload = {
             year: p.year ?? null,
@@ -117,24 +95,23 @@ const my = {
             gender: p.gender ?? null,
             major: p.major ?? null,
             mbti: p.mbti ?? null,
-            nickname,
-            nicknameLower: nicknameLower ?? null,
+            nickname: (p.nickname ?? p.nick ?? "").trim() || null,
             content: (p.content ?? p.consume ?? "").trim() || null,
             freeText: (p.freeText ?? "").trim(),
             isBot: !!p.isBot,
 
             // 패널티/이용 제한
-            penaltyScore: p.penaltyScore ?? (prev?.penaltyScore ?? 0),
-            penaltyUntil: p.penaltyUntil ?? (prev?.penaltyUntil ?? null),
+            penaltyScore: p.penaltyScore ?? 0,
+            penaltyUntil: p.penaltyUntil ?? null,
 
             // 매칭 온도 (있던 값 유지)
-            honbapTemp: p.honbapTemp ?? (prev?.honbapTemp ?? 50),
+            honbapTemp: p.honbapTemp ?? 50,
 
             // matchCount / matchStars 는 addMatchSuccess 에서만 조정
             updatedAt: serverTimestamp(),
         };
 
-        await setDoc(ref, payload, { merge: true });
+        await setDoc(doc(db, "profiles", my.uid), payload, { merge: true });
     }
 };
 
@@ -160,9 +137,18 @@ const _actionCodeSettings = () => ({
     handleCodeInApp: true
 });
 
+// ✅ 여기에서 이메일 중복 여부를 체크해서 이미 가입된 메일이면 바로 막는다.
 async function sendEmailLink(email) {
     const e = (email || "").trim();
     _assertKwEmail(e);
+
+    // 이미 가입된 이메일인지 확인
+    const methods = await fetchSignInMethodsForEmail(auth, e);
+    if (methods && methods.length > 0) {
+        // signup.html 에서 catch 해서 이 메시지를 그대로 보여줄 수 있음
+        throw new Error("이미 가입된 메일입니다.");
+    }
+
     await sendSignInLinkToEmail(auth, e, _actionCodeSettings());
     try { localStorage.setItem("signup_email", e); } catch { }
     return true;
